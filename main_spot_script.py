@@ -40,10 +40,11 @@ def run_spot_strategy():
 
 if __name__ == "__main__":
     # the spot script, no ui, if you want to use the window UI, please use the main.py
-    # before running, remember to past your api here.
+    # before running, remember to paste your api here.
+    # 具体配置现货的api key 和 private key 可以参考这个文档 (https://github.com/51bitquant/howtrader/tree/main)
     spot_settings = {
-        "key": "past your api key from binance exchange",
-        "secret": "past your api secret from binance exchange",
+        "api_key": "paste your api key from binance exchange",
+        "private_key": "paste your private key from asymmetric generator",
         "proxy_host": "",
         "proxy_port": 0
     }

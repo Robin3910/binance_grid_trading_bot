@@ -19,27 +19,24 @@ from gridtrader.event import (
     EVENT_ACCOUNT,
     EVENT_CONTRACT,
     EVENT_LOG,
-    EVENT_CTA_LOG,
     EVENT_CTA_STRATEGY
 )
 from .gateway import BaseGateway
 from .object import (
     CancelRequest,
-    QueryRequest,
     LogData,
     OrderRequest,
     SubscribeRequest,
     OrderData,
     TickData,
-    TradeData,
     PositionData,
     AccountData,
-    ContractData
+    ContractData,
+    OrderQueryRequest,
+    now_local
 )
 from .setting import SETTINGS
 from .utility import get_folder_path, TRADER_DIR
-from gridtrader.gateway.binance.binance_gateway import BinanceGateway
-from gridtrader.gateway.binances.binances_gateway import BinancesGateway
 from .strategies.template import CtaTemplate
 
 from collections import defaultdict
@@ -54,8 +51,8 @@ from gridtrader.trader.constant import (
     Offset
 )
 
-from gridtrader.trader.utility import load_json, save_json, extract_vt_symbol, round_to, floor_to
-
+from gridtrader.trader.utility import load_json, save_json, round_to, floor_to
+from gridtrader.gateway.binance import BinanceSpotGateway, BinanceFuturesUsdtGateway
 
 class MainEngine:
     """
@@ -75,8 +72,8 @@ class MainEngine:
 
         os.chdir(TRADER_DIR)  # Change working directory
 
-        self.spot_gateway = BinanceGateway(self.event_engine)
-        self.future_gateway = BinancesGateway(self.event_engine)
+        self.spot_gateway = BinanceSpotGateway(self.event_engine, gateway_name="Spot")
+        self.future_gateway = BinanceFuturesUsdtGateway(self.event_engine, gateway_name="Futures")
 
         self.gateways[self.spot_gateway.gateway_name] = self.spot_gateway
         self.gateways[self.future_gateway.gateway_name] = self.future_gateway
@@ -173,7 +170,7 @@ class MainEngine:
         if gateway:
             gateway.cancel_order(req)
 
-    def query_order(self, req: QueryRequest, gateway_name: str) -> None:
+    def query_order(self, req: OrderQueryRequest, gateway_name: str) -> None:
         """
         Send query order request to a specific gateway.
         """
@@ -298,7 +295,7 @@ class LogEngine(BaseEngine):
         """
         Add file output of log.
         """
-        today_date = datetime.now().strftime("%Y%m%d")
+        today_date = now_local.strftime("%Y%m%d")
         filename = f"vt_{today_date}.log"
         log_path = get_folder_path("log")
         file_path = log_path.joinpath(filename)
@@ -410,7 +407,7 @@ class OmsEngine(BaseEngine):
             self.order_update_interval = 0
             orders = self.get_all_active_orders()
             for order in orders:
-                if order.datetime and (datetime.now() - order.datetime).seconds > SETTINGS.get(
+                if order.datetime and (now_local - order.datetime).seconds > SETTINGS.get(
                         'order_update_timer', 120):
                     req = order.create_query_request()
                     self.main_engine.query_order(req, order.gateway_name)
@@ -526,10 +523,12 @@ class CtaEngine(BaseEngine):
         """
         Load strategy class from source code.
         """
-        from .strategies.future_grid_strategy import FutureGridStrategy
+        from .strategies.futures_grid_strategy import FuturesGridStrategy
         from .strategies.spot_grid_strategy import SpotGridStrategy
-        self.classes[FutureGridStrategy.__name__] = FutureGridStrategy
+        from .strategies.futures_grid_long_short_strategy import FuturesGridLongShortStrategy
+        self.classes[FuturesGridStrategy.__name__] = FuturesGridStrategy
         self.classes[SpotGridStrategy.__name__] = SpotGridStrategy
+        self.classes[FuturesGridLongShortStrategy.__name__] = FuturesGridLongShortStrategy
 
     def load_strategy_setting(self):
         """
@@ -633,7 +632,7 @@ class CtaEngine(BaseEngine):
             return ""
 
         # Round order price and volume to nearest incremental value
-        price = round_to(price, contract.price_tick)
+        price = round_to(price, contract.pricetick)
         volume = floor_to(volume, contract.min_volume)
 
         return self.send_limit_order(strategy, contract, direction, offset, price, volume)
@@ -738,7 +737,7 @@ class CtaEngine(BaseEngine):
         contract: ContractData = self.main_engine.get_contract(strategy.vt_symbol)
 
         if contract:
-            return contract.price_tick
+            return contract.pricetick
         else:
             return None
 

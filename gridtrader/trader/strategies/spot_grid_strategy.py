@@ -196,7 +196,7 @@ class SpotGridStrategy(CtaTemplate):
 
             step_price = (self.upper_price - self.bottom_price) / self.grid_number
 
-            self.step_price = float(floor_to(step_price, self.contract_data.price_tick))
+            self.step_price = float(floor_to(step_price, self.contract_data.pricetick))
 
             mid_count = round((float(self.tick.bid_price_1) - self.bottom_price) / self.step_price)
 

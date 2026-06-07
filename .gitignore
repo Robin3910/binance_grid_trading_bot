@@ -111,6 +111,8 @@ venv.bak/
 log.txt
 
 /gridtrader/log/*
-
-
+/gridtrader/connect_binance_spot.json
+/gridtrader/connect_binance_usdt.json
+/gridtrader/connect_futures.json
+/gridtrader/connect_spot.json
 

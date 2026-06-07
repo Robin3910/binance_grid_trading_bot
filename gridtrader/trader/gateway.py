@@ -1,13 +1,9 @@
-"""
-
-"""
-
 from abc import ABC, abstractmethod
-from typing import Any, Sequence, Dict, List
-import uuid
+from typing import Any, Dict, List, Optional, Callable
+from copy import copy
 
 from gridtrader.event import Event, EventEngine
-from gridtrader.event import (
+from .event import (
     EVENT_TICK,
     EVENT_ORDER,
     EVENT_TRADE,
@@ -15,20 +11,29 @@ from gridtrader.event import (
     EVENT_ACCOUNT,
     EVENT_CONTRACT,
     EVENT_LOG,
+    EVENT_QUOTE,
+    EVENT_ORIGINAL_KLINE,
+    EVENT_FUNDING_RATE_DATA
 )
 from .object import (
     TickData,
     OrderData,
     TradeData,
+    OrderQueryRequest,
     PositionData,
     AccountData,
     ContractData,
     LogData,
+    QuoteData,
     OrderRequest,
     CancelRequest,
-    QueryRequest,
     SubscribeRequest,
-    Exchange
+    HistoryRequest,
+    QuoteRequest,
+    Exchange,
+    BarData,
+    OriginalKlineData,
+    FundingRateData
 )
 
 
@@ -41,7 +46,7 @@ class BaseGateway(ABC):
 
     ---
     ## Basics
-    A gateway should satisfies:
+    A gateway should satisfy:
     * this class should be thread-safe:
         * all methods should be thread-safe
         * no mutable shared properties between objects.
@@ -66,10 +71,10 @@ class BaseGateway(ABC):
         the object should not be modified after passing to on_xxxx.
     So if you use a cache to store reference of data, use copy.copy to create a new object
     before passing that data into on_xxxx
-
-
-
     """
+
+    # Default name for the gateway.
+    default_name: str = ""
 
     # Fields required in setting dict for connect function.
     default_setting: Dict[str, Any] = {}
@@ -77,17 +82,16 @@ class BaseGateway(ABC):
     # Exchanges supported in the gateway.
     exchanges: List[Exchange] = []
 
-    def __init__(self, event_engine: EventEngine, gateway_name: str):
+    def __init__(self, event_engine: EventEngine, gateway_name: str) -> None:
         """"""
         self.event_engine: EventEngine = event_engine
         self.gateway_name: str = gateway_name
-        self.active_orders: Dict[str, OrderData] = {}  # {order_id: OrderData} for updating the trade event
 
     def on_event(self, type: str, data: Any = None) -> None:
         """
         General event push.
         """
-        event = Event(type, data)
+        event: Event = Event(type, data)
         self.event_engine.put(event)
 
     def on_tick(self, tick: TickData) -> None:
@@ -114,32 +118,6 @@ class BaseGateway(ABC):
         self.on_event(EVENT_ORDER, order)
         self.on_event(EVENT_ORDER + order.vt_orderid, order)
 
-        # for updating the trade event
-        pre_order = self.active_orders.get(order.vt_orderid, None)
-
-        if order.is_active():
-            self.active_orders[order.vt_orderid] = order
-        elif order.vt_orderid in self.active_orders:
-            self.active_orders.pop(order.vt_orderid)
-
-        if order.trade_data:
-            self.on_trade(order.trade_data)
-        elif pre_order:
-            trade_volume = order.traded - pre_order.traded
-            if trade_volume > 0:
-                trade = TradeData(
-                    symbol=order.symbol,
-                    exchange=order.exchange,
-                    orderid=order.orderid,
-                    tradeid=str(uuid.uuid1()),
-                    direction=order.direction,
-                    price=order.price,
-                    volume=trade_volume,
-                    datetime=order.datetime,
-                    gateway_name=self.gateway_name,
-                )
-                self.on_trade(trade)
-
     def on_position(self, position: PositionData) -> None:
         """
         Position event push.
@@ -156,6 +134,18 @@ class BaseGateway(ABC):
         self.on_event(EVENT_ACCOUNT, account)
         self.on_event(EVENT_ACCOUNT + account.vt_accountid, account)
 
+    def on_kline(self, kline: OriginalKlineData):
+        # self.on_event(EVENT_ORIGINAL_KLINE, kline)
+        self.on_event(EVENT_ORIGINAL_KLINE + kline.vt_symbol, kline)
+
+    def on_quote(self, quote: QuoteData) -> None:
+        """
+        Quote event push.
+        Quote event of a specific vt_symbol is also pushed.
+        """
+        self.on_event(EVENT_QUOTE, quote)
+        self.on_event(EVENT_QUOTE + quote.vt_symbol, quote)
+
     def on_log(self, log: LogData) -> None:
         """
         Log event push.
@@ -168,11 +158,15 @@ class BaseGateway(ABC):
         """
         self.on_event(EVENT_CONTRACT, contract)
 
+    def on_funding_rate(self, funding_rate: FundingRateData):
+        self.on_event(EVENT_FUNDING_RATE_DATA, funding_rate)
+        self.on_event(EVENT_FUNDING_RATE_DATA + funding_rate.vt_symbol, funding_rate)
+
     def write_log(self, msg: str) -> None:
         """
         Write a log event from gateway.
         """
-        log = LogData(msg=msg, gateway_name=self.gateway_name)
+        log: LogData = LogData(msg=msg, gateway_name=self.gateway_name)
         self.on_log(log)
 
     @abstractmethod
@@ -238,37 +232,38 @@ class BaseGateway(ABC):
         """
         pass
 
-    @abstractmethod
-    def query_order(self, req: QueryRequest) -> None:
+    def send_quote(self, req: QuoteRequest) -> str:
         """
-        query an existing order.
+        Send a new two-sided quote to server.
+
+        implementation should finish the tasks blow:
+        * create an QuoteData from req using QuoteRequest.create_quote_data
+        * assign a unique(gateway instance scope) id to QuoteData.quoteid
+        * send request to server
+            * if request is sent, QuoteData.status should be set to Status.SUBMITTING
+            * if request is failed to sent, QuoteData.status should be set to Status.REJECTED
+        * response on_quote:
+        * return vt_quoteid
+
+        :return str vt_quoteid for created QuoteData
+        """
+        return ""
+
+    def cancel_quote(self, req: CancelRequest) -> None:
+        """
+        Cancel an existing quote.
         implementation should finish the tasks blow:
         * send request to server
         """
         pass
 
-    def send_orders(self, reqs: Sequence[OrderRequest]) -> List[str]:
+    def query_order(self, req: OrderQueryRequest) -> None:
         """
-        Send a batch of orders to server.
-        Use a for loop of send_order function by default.
-        Reimplement this function if batch order supported on server.
+        Cancel an existing quote.
+        implementation should finish the tasks blow:
+        * send request to server
         """
-        vt_orderids = []
-
-        for req in reqs:
-            vt_orderid = self.send_order(req)
-            vt_orderids.append(vt_orderid)
-
-        return vt_orderids
-
-    def cancel_orders(self, reqs: Sequence[CancelRequest]) -> None:
-        """
-        Cancel a batch of orders to server.
-        Use a for loop of cancel_order function by default.
-        Reimplement this function if batch cancel supported on server.
-        """
-        for req in reqs:
-            self.cancel_order(req)
+        pass
 
     @abstractmethod
     def query_account(self) -> None:
@@ -277,16 +272,153 @@ class BaseGateway(ABC):
         """
         pass
 
-    @abstractmethod
+    def query_latest_kline(self, req: HistoryRequest) -> None:
+        """
+        Query account balance.
+        """
+        pass
+
     def query_position(self) -> None:
         """
         Query holding positions.
         """
         pass
 
+    def query_funding_rate(self) -> None:
+        """query funding/premium rate of the perpetual product"""
+        pass
+
+    def query_history(self, req: HistoryRequest) -> List[BarData]:
+        """
+        Query bar history data.
+        """
+        pass
 
     def get_default_setting(self) -> Dict[str, Any]:
         """
         Return default setting dict.
         """
         return self.default_setting
+
+
+class LocalOrderManager:
+    """
+    Management tool to support use local order id for trading.
+    """
+
+    def __init__(self, gateway: BaseGateway, order_prefix: str = "") -> None:
+        """"""
+        self.gateway: BaseGateway = gateway
+
+        # For generating local orderid
+        self.order_prefix: str = order_prefix
+        self.order_count: int = 0
+        self.orders: Dict[str, OrderData] = {}        # local_orderid: order
+
+        # Map between local and system orderid
+        self.local_sys_orderid_map: Dict[str, str] = {}
+        self.sys_local_orderid_map: Dict[str, str] = {}
+
+        # Push order data buf
+        self.push_data_buf: Dict[str, Dict] = {}  # sys_orderid: data
+
+        # Callback for processing push order data
+        self.push_data_callback: Callable = None
+
+        # Cancel request buf
+        self.cancel_request_buf: Dict[str, CancelRequest] = {}    # local_orderid: req
+
+        # Hook cancel order function
+        self._cancel_order: Callable = gateway.cancel_order
+        gateway.cancel_order = self.cancel_order
+
+    def new_local_orderid(self) -> str:
+        """
+        Generate a new local orderid.
+        """
+        self.order_count += 1
+        local_orderid: str = self.order_prefix + str(self.order_count).rjust(8, "0")
+        return local_orderid
+
+    def get_local_orderid(self, sys_orderid: str) -> str:
+        """
+        Get local orderid with sys orderid.
+        """
+        local_orderid: str = self.sys_local_orderid_map.get(sys_orderid, "")
+
+        if not local_orderid:
+            local_orderid = self.new_local_orderid()
+            self.update_orderid_map(local_orderid, sys_orderid)
+
+        return local_orderid
+
+    def get_sys_orderid(self, local_orderid: str) -> str:
+        """
+        Get sys orderid with local orderid.
+        """
+        sys_orderid: str = self.local_sys_orderid_map.get(local_orderid, "")
+        return sys_orderid
+
+    def update_orderid_map(self, local_orderid: str, sys_orderid: str) -> None:
+        """
+        Update orderid map.
+        """
+        self.sys_local_orderid_map[sys_orderid] = local_orderid
+        self.local_sys_orderid_map[local_orderid] = sys_orderid
+
+        self.check_cancel_request(local_orderid)
+        self.check_push_data(sys_orderid)
+
+    def check_push_data(self, sys_orderid: str) -> None:
+        """
+        Check if any order push data waiting.
+        """
+        if sys_orderid not in self.push_data_buf:
+            return
+
+        data: dict = self.push_data_buf.pop(sys_orderid)
+        if self.push_data_callback:
+            self.push_data_callback(data)
+
+    def add_push_data(self, sys_orderid: str, data: dict) -> None:
+        """
+        Add push data into buf.
+        """
+        self.push_data_buf[sys_orderid] = data
+
+    def get_order_with_sys_orderid(self, sys_orderid: str) -> Optional[OrderData]:
+        """"""
+        local_orderid: str = self.sys_local_orderid_map.get(sys_orderid, None)
+        if not local_orderid:
+            return None
+        else:
+            return self.get_order_with_local_orderid(local_orderid)
+
+    def get_order_with_local_orderid(self, local_orderid: str) -> OrderData:
+        """"""
+        order: OrderData = self.orders[local_orderid]
+        return copy(order)
+
+    def on_order(self, order: OrderData) -> None:
+        """
+        Keep an order buf before pushing it to gateway.
+        """
+        self.orders[order.orderid] = copy(order)
+        self.gateway.on_order(order)
+
+    def cancel_order(self, req: CancelRequest) -> None:
+        """"""
+        sys_orderid: str = self.get_sys_orderid(req.orderid)
+        if not sys_orderid:
+            self.cancel_request_buf[req.orderid] = req
+            return
+
+        self._cancel_order(req)
+
+    def check_cancel_request(self, local_orderid: str) -> None:
+        """"""
+        if local_orderid not in self.cancel_request_buf:
+            return
+
+        req: CancelRequest = self.cancel_request_buf.pop(local_orderid)
+        self.gateway.cancel_order(req)

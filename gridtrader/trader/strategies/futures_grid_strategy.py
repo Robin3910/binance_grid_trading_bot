@@ -8,7 +8,7 @@ from .template import CtaTemplate
 from gridtrader.trader.utility import GridPositionCalculator
 
 
-class FutureGridStrategy(CtaTemplate):
+class FuturesGridStrategy(CtaTemplate):
     """
     币安合约中性网格
     策略在震荡行情下表现很好，但是如果发生趋势行情，单次止损会比较大，导致亏损过多。
@@ -140,7 +140,7 @@ class FutureGridStrategy(CtaTemplate):
 
             step_price = (self.upper_price - self.bottom_price) / self.grid_number
 
-            self.step_price = float(floor_to(step_price, self.contract_data.price_tick))
+            self.step_price = float(floor_to(step_price, self.contract_data.pricetick))
 
             mid_count = round((float(self.tick.bid_price_1) - self.bottom_price) / self.step_price)
 
