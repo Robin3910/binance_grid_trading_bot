@@ -526,9 +526,11 @@ class CtaEngine(BaseEngine):
         from .strategies.futures_grid_strategy import FuturesGridStrategy
         from .strategies.spot_grid_strategy import SpotGridStrategy
         from .strategies.futures_grid_long_short_strategy import FuturesGridLongShortStrategy
+        from .strategies.futures_long_grid_strategy import FuturesLongGridStrategy
         self.classes[FuturesGridStrategy.__name__] = FuturesGridStrategy
         self.classes[SpotGridStrategy.__name__] = SpotGridStrategy
         self.classes[FuturesGridLongShortStrategy.__name__] = FuturesGridLongShortStrategy
+        self.classes[FuturesLongGridStrategy.__name__] = FuturesLongGridStrategy
 
     def load_strategy_setting(self):
         """

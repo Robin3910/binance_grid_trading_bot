@@ -114,6 +114,47 @@ main_spot_script.py（币安现货）
 
 另外策略运行的一些变量会保存在项目下的文件gridtrader/grid_strategy_data.json中。
 
+# 添加合约只做多网格策略
+
+选择 `FuturesLongGridStrategy` 可运行 USDT 永续合约只做多网格。它只会提交开多单和 `reduceOnly` 平多单，绝不会提交开空单。`vt_symbol` 使用大写，例如 `ETHUSDT`。
+
+开启初始建仓后，策略会按当前所在格计算初始库存：`initial_position_count = grid_number - current_grid`。例如总共 10 格、当前处于第 3 格，则启动时以当前价格提交 `7 × order_volume` 的限价开多单；成交后，在第 4 至第 10 格各挂一份初始止盈单。初始止盈成交后不补仓；价格下跌后成交的买单才属于正常网格，成交后按上一格卖出、下一格买入的逻辑循环。
+
+示例配置：
+
+```json
+{
+  "strategy_name": "ethusdt_long_grid",
+  "vt_symbol": "ETHUSDT",
+  "upper_price": 4000,
+  "bottom_price": 3000,
+  "grid_number": 20,
+  "order_volume": 0.01,
+  "max_open_orders": 3
+}
+```
+
+策略配置文件中的完整结构如下：
+
+```json
+{
+  "ethusdt_long_grid": {
+    "class_name": "FuturesLongGridStrategy",
+    "vt_symbol": "ETHUSDT",
+    "setting": {
+      "upper_price": 4000,
+      "bottom_price": 3000,
+      "grid_number": 20,
+      "order_volume": 0.01,
+      "max_open_orders": 3,
+      "initial_entry_enabled": true
+    }
+  }
+}
+```
+
+`order_volume` 是每格 ETH 合约数量，`max_open_orders` 是最多同时挂出的普通网格开多买单数量。`initial_entry_enabled` 控制是否按当前所在格建立初始库存；初始库存数量由剩余格数自动计算，不再单独填写。建议先用较小的 `order_volume`，因为初始建仓数量可能是多格数量之和。启动前应确保合约账户处于单向持仓模式，并在测试网先验证保证金、杠杆和最小下单量。
+
 # 添加现货网格策略 
 
 <img src="resources/add_spot_grid_strategy.png" alt="window picture"/>

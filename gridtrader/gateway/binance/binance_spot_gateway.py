@@ -49,13 +49,15 @@ from gridtrader.trader.constant import LOCAL_TZ
 from gridtrader.trader.setting import SETTINGS
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from gridtrader.trader.object import now_local
-# REST API HOST
+# REST API hosts
 REST_HOST: str = "https://api.binance.com"
+TESTNET_REST_HOST: str = "https://testnet.binance.vision"
 
-# Websocket API HOST
-# WEBSOCKET_TRADE_HOST: str = "wss://stream.binance.com:443/ws/stream"
+# Websocket API hosts
 WEBSOCKET_TRADE_HOST: str = "wss://ws-api.binance.com:443/ws-api/v3"
 WEBSOCKET_DATA_HOST: str = "wss://stream.binance.com:443/stream"
+TESTNET_WEBSOCKET_TRADE_HOST: str = "wss://ws-api.testnet.binance.vision/ws-api/v3"
+TESTNET_WEBSOCKET_DATA_HOST: str = "wss://stream.testnet.binance.vision/stream"
 
 # order status mapping
 STATUS_BINANCE2VT: Dict[str, Status] = {
@@ -200,6 +202,7 @@ class BinanceSpotGateway(BaseGateway):
     default_setting: Dict[str, Any] = {
         "api_key": "",
         "private_key": "",
+        "testnet": False,
         "proxy_host": "",
         "proxy_port": 0
     }
@@ -233,9 +236,14 @@ class BinanceSpotGateway(BaseGateway):
         else:
             proxy_port: int = 0
 
-        self.rest_api.connect(self.api_key, self.private_key, proxy_host, proxy_port)
-        self.market_ws_api.connect(proxy_host, proxy_port)
-        self.trade_ws_api.connect(WEBSOCKET_TRADE_HOST, self.api_key, self.private_key, proxy_host, proxy_port)
+        testnet: bool = bool(setting.get("testnet", False))
+        rest_host: str = TESTNET_REST_HOST if testnet else REST_HOST
+        trade_ws_host: str = TESTNET_WEBSOCKET_TRADE_HOST if testnet else WEBSOCKET_TRADE_HOST
+        data_ws_host: str = TESTNET_WEBSOCKET_DATA_HOST if testnet else WEBSOCKET_DATA_HOST
+
+        self.rest_api.connect(self.api_key, self.private_key, rest_host, proxy_host, proxy_port)
+        self.market_ws_api.connect(data_ws_host, proxy_host, proxy_port)
+        self.trade_ws_api.connect(trade_ws_host, self.api_key, self.private_key, proxy_host, proxy_port)
 
         self.event_engine.unregister(EVENT_TIMER, self.process_timer_event)
         self.event_engine.register(EVENT_TIMER, self.process_timer_event)
@@ -404,6 +412,7 @@ class BinanceSpotRestAPi(RestClient):
             self,
             api_key: str,
             private_key: Ed25519PrivateKey,
+            rest_host: str,
             proxy_host: str,
             proxy_port: int
     ) -> None:
@@ -417,7 +426,7 @@ class BinanceSpotRestAPi(RestClient):
                 int(now_local.strftime("%y%m%d%H%M%S")) * self.order_count
         )
 
-        self.init(REST_HOST, proxy_host, proxy_port)
+        self.init(rest_host, proxy_host, proxy_port)
 
         self.start()
 
@@ -1063,9 +1072,9 @@ class BinanceSpotDataWebsocketApi(WebsocketClient):
         self.reqid: int = 0
         self.receive_timeout = 60
 
-    def connect(self, proxy_host: str, proxy_port: int):
+    def connect(self, url: str, proxy_host: str, proxy_port: int):
         """connect market data ws"""
-        self.init(WEBSOCKET_DATA_HOST, proxy_host, proxy_port)
+        self.init(url, proxy_host, proxy_port)
         self.start()
 
     def on_connected(self) -> None:

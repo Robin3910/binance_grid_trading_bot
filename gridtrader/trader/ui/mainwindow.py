@@ -16,7 +16,7 @@ from .widget import (
 )
 
 from ..engine import MainEngine
-from ..utility import get_icon_path, TRADER_DIR
+from ..utility import get_icon_path, load_json, TRADER_DIR
 from .widget import  CtaManager
 
 
@@ -31,25 +31,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.main_engine: MainEngine = main_engine
         self.event_engine: EventEngine = event_engine
 
-        self.window_title: str = f"Binance Grid Trader {gridtrader.__version__} [{TRADER_DIR}]"
+        self.window_title: str = f"币安网格交易器 {gridtrader.__version__} [{TRADER_DIR}]"
 
         self.widgets: Dict[str, QtWidgets.QWidget] = {}
         self.init_ui()
         self.init_menu()
+        self.auto_connect()
 
     def init_ui(self) -> None:
         """"""
         self.setWindowTitle(self.window_title)
 
         """"""
-        cta_widget, dock = self.create_dock(CtaManager, 'Strategies', QtCore.Qt.LeftDockWidgetArea)
+        cta_widget, dock = self.create_dock(CtaManager, '策略管理', QtCore.Qt.LeftDockWidgetArea)
 
         self.create_dock(
-            ActiveOrderMonitor, "Active Orders", QtCore.Qt.RightDockWidgetArea
+            ActiveOrderMonitor, "活动委托", QtCore.Qt.RightDockWidgetArea
         )
 
         log_monitor, dock2 = self.create_dock(
-            LogMonitor, "Logs", QtCore.Qt.RightDockWidgetArea
+            LogMonitor, "日志", QtCore.Qt.RightDockWidgetArea
         )
 
         cta_widget.log_monitor = log_monitor
@@ -59,12 +60,12 @@ class MainWindow(QtWidgets.QMainWindow):
         bar = self.menuBar()
 
         # System menu
-        sys_menu = bar.addMenu("Config Binance API")
+        sys_menu = bar.addMenu("配置币安 API")
 
         gateway_names = self.main_engine.get_all_gateway_names()
         for name in gateway_names:
             func = partial(self.connect, name)
-            self.add_menu_action(sys_menu, f"Connect {name}", "connect.ico", func)
+            self.add_menu_action(sys_menu, f"连接 {name}", "connect.ico", func)
 
     def add_menu_action(
             self,
@@ -107,14 +108,39 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = ConnectDialog(self.main_engine, gateway_name)
         dialog.exec_()
 
+    def auto_connect(self) -> None:
+        """
+        Auto connect gateways with previously saved API settings.
+        """
+        setting_filename_map: Dict[str, Tuple[str, ...]] = {
+            "Spot": ("api_key", "private_key"),
+            "Futures": ("key", "secret"),
+        }
+
+        for gateway_name, required_fields in setting_filename_map.items():
+            filename = f"connect_{gateway_name.lower()}.json"
+            setting = load_json(filename)
+
+            if not setting:
+                continue
+
+            if not all(str(setting.get(field, "")).strip() for field in required_fields):
+                self.main_engine.write_log(
+                    f"{gateway_name} 接口未配置完整的 API 信息,跳过自动连接。"
+                )
+                continue
+
+            self.main_engine.write_log(f"自动连接 {gateway_name} 接口...")
+            self.main_engine.connect(setting, gateway_name)
+
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """
         Call main engine close function before exit.
         """
         reply = QtWidgets.QMessageBox.question(
             self,
-            "Exit",
-            "Confirm Exit?",
+            "退出确认",
+            "确定要退出吗？",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.No,
         )

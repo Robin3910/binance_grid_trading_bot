@@ -44,9 +44,10 @@ if __name__ == "__main__":
     # before running, remember to past your api here.
 
     futures_settings = {
-        "key": "past your api key from binance exchange",
-        "secret": "past your api secret from binance exchange",
+        "key": "paste your testnet api key from Binance Futures Testnet",
+        "secret": "paste your testnet api secret from Binance Futures Testnet",
         "futures_type": "USDT",
+        "testnet": True,
         "proxy_host": "",
         "proxy_port": 0
     }

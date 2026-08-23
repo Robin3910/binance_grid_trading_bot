@@ -116,3 +116,10 @@ log.txt
 /gridtrader/connect_futures.json
 /gridtrader/connect_spot.json
 
+# Local strategy runtime state (contains positions and trade counts)
+/gridtrader/grid_strategy_data.json
+/gridtrader/grid_strategy_setting.json
+
+# Promotional README (kept local)
+/README-Promo.md
+

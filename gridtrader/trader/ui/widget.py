@@ -24,6 +24,66 @@ COLOR_BLACK = QtGui.QColor("black")
 from ..engine import CtaEngine
 
 
+DISPLAY_NAMES = {
+    "strategy_name": "策略名称",
+    "vt_symbol": "交易对",
+    "class_name": "策略类型",
+    "author": "作者",
+    "upper_price": "价格上限",
+    "bottom_price": "价格下限",
+    "grid_number": "网格数量",
+    "order_volume": "每格数量",
+    "max_open_orders": "最大挂单数",
+    "invest_coin": "投资币种",
+    "inited": "已初始化",
+    "trading": "交易中",
+    "pos": "持仓",
+    "time": "时间",
+    "msg": "内容",
+    "gateway_name": "接口",
+    "symbol": "交易对",
+    "type": "类型",
+    "direction": "方向",
+    "offset": "开平",
+    "price": "价格",
+    "volume": "委托数量",
+    "traded": "已成交",
+    "status": "状态",
+    "datetime": "时间",
+    "key": "API 密钥",
+    "secret": "API 私钥",
+    "proxy_host": "代理地址",
+    "proxy_port": "代理端口",
+    "futures_type": "合约类型",
+    "futures_types": "合约类型",
+}
+
+ENUM_DISPLAY_NAMES = {
+    "Long": "多",
+    "Short": "空",
+    "Net": "净",
+    "OPEN": "开仓",
+    "CLOSE": "平仓",
+    "CLOSETODAY": "平今",
+    "CLOSEYESTERDAY": "平昨",
+    "SUBMITTING": "提交中",
+    "NOTTRADED": "未成交",
+    "PARTTRADED": "部分成交",
+    "ALLTRADED": "全部成交",
+    "CANCELLED": "已撤销",
+    "REJECTED": "已拒绝",
+    "LIMIT": "限价",
+    "TAKER": "市价吃单",
+    "MAKER": "挂单",
+    "STOP": "止损市价",
+    "STOP_LIMIT": "止损限价",
+}
+
+
+def get_display_name(name: str) -> str:
+    return DISPLAY_NAMES.get(name, name)
+
+
 class BaseCell(QtWidgets.QTableWidgetItem):
     """
     General cell used in tablewidgets.
@@ -63,7 +123,9 @@ class EnumCell(BaseCell):
         Set text using enum.constant.value.
         """
         if content:
-            super(EnumCell, self).set_content(content.value, data)
+            super(EnumCell, self).set_content(
+                ENUM_DISPLAY_NAMES.get(content.value, content.value), data
+            )
 
 
 class DirectionCell(EnumCell):
@@ -173,7 +235,7 @@ class BaseMonitor(QtWidgets.QTableWidget):
         """
         self.menu = QtWidgets.QMenu(self)
 
-        resize_action = QtWidgets.QAction("Resize Columns", self)
+        resize_action = QtWidgets.QAction("调整列宽", self)
         resize_action.triggered.connect(self.resize_columns)
         self.menu.addAction(resize_action)
 
@@ -266,9 +328,9 @@ class LogMonitor(BaseMonitor):
     sorting = False
 
     headers = {
-        "time": {"display": "time", "cell": TimeCell, "update": False},
-        "msg": {"display": "msg", "cell": MsgCell, "update": False},
-        "gateway_name": {"display": "gateway", "cell": BaseCell, "update": False},
+        "time": {"display": "时间", "cell": TimeCell, "update": False},
+        "msg": {"display": "内容", "cell": MsgCell, "update": False},
+        "gateway_name": {"display": "接口", "cell": BaseCell, "update": False},
     }
 
 
@@ -282,17 +344,16 @@ class ActiveOrderMonitor(BaseMonitor):
     sorting = True
 
     headers: Dict[str, dict] = {
-        # "orderid": {"display": "Order Id", "cell": BaseCell, "update": False},
-        "symbol": {"display": "Symbol", "cell": BaseCell, "update": False},
-        "type": {"display": "Type", "cell": EnumCell, "update": False},
-        "direction": {"display": "Direction", "cell": DirectionCell, "update": False},
-        "offset": {"display": "Offset", "cell": EnumCell, "update": False},
-        "price": {"display": "Price", "cell": BaseCell, "update": False},
-        "volume": {"display": "Volume", "cell": BaseCell, "update": True},
-        "traded": {"display": "Traded", "cell": BaseCell, "update": True},
-        "status": {"display": "Status", "cell": EnumCell, "update": True},
-        "datetime": {"display": "Time", "cell": TimeCell, "update": True},
-        "gateway_name": {"display": "Gateway", "cell": BaseCell, "update": False},
+        "symbol": {"display": "交易对", "cell": BaseCell, "update": False},
+        "type": {"display": "类型", "cell": EnumCell, "update": False},
+        "direction": {"display": "方向", "cell": DirectionCell, "update": False},
+        "offset": {"display": "开平", "cell": EnumCell, "update": False},
+        "price": {"display": "价格", "cell": BaseCell, "update": False},
+        "volume": {"display": "委托数量", "cell": BaseCell, "update": True},
+        "traded": {"display": "已成交", "cell": BaseCell, "update": True},
+        "status": {"display": "状态", "cell": EnumCell, "update": True},
+        "datetime": {"display": "时间", "cell": TimeCell, "update": True},
+        "gateway_name": {"display": "接口", "cell": BaseCell, "update": False},
     }
 
     def init_ui(self):
@@ -301,7 +362,7 @@ class ActiveOrderMonitor(BaseMonitor):
         """
         super(ActiveOrderMonitor, self).init_ui()
 
-        self.setToolTip("Double Click To Cancel Order")
+        self.setToolTip("双击撤销委托")
         self.itemDoubleClicked.connect(self.cancel_order)
 
     def cancel_order(self, cell: BaseCell) -> None:
@@ -350,24 +411,24 @@ class CtaManager(QtWidgets.QWidget):
 
     def init_ui(self):
         """"""
-        self.setWindowTitle("Binance Grid Strategy")
+        self.setWindowTitle("币安网格策略")
 
         # Create widgets
         self.class_combo = QtWidgets.QComboBox()
 
-        add_button = QtWidgets.QPushButton("Add Strategy")
+        add_button = QtWidgets.QPushButton("添加策略")
         add_button.clicked.connect(self.add_strategy)
 
-        init_button = QtWidgets.QPushButton("Init All Strategies")
+        init_button = QtWidgets.QPushButton("初始化全部策略")
         init_button.clicked.connect(self.cta_engine.init_all_strategies)
 
-        start_button = QtWidgets.QPushButton("Start All Strategies")
+        start_button = QtWidgets.QPushButton("启动全部策略")
         start_button.clicked.connect(self.cta_engine.start_all_strategies)
 
-        stop_button = QtWidgets.QPushButton("Stop All Strategies")
+        stop_button = QtWidgets.QPushButton("停止全部策略")
         stop_button.clicked.connect(self.cta_engine.stop_all_strategies)
 
-        clear_button = QtWidgets.QPushButton("Clear Logs")
+        clear_button = QtWidgets.QPushButton("清空日志")
         clear_button.clicked.connect(self.clear_log)
 
         self.scroll_layout = QtWidgets.QVBoxLayout()
@@ -486,21 +547,21 @@ class StrategyManager(QtWidgets.QFrame):
         self.setFrameShape(self.Box)
         self.setLineWidth(1)
 
-        self.init_button = QtWidgets.QPushButton("Init")
+        self.init_button = QtWidgets.QPushButton("初始化")
         self.init_button.clicked.connect(self.init_strategy)
 
-        self.start_button = QtWidgets.QPushButton("Start")
+        self.start_button = QtWidgets.QPushButton("启动")
         self.start_button.clicked.connect(self.start_strategy)
         self.start_button.setEnabled(False)
 
-        self.stop_button = QtWidgets.QPushButton("Stop")
+        self.stop_button = QtWidgets.QPushButton("停止")
         self.stop_button.clicked.connect(self.stop_strategy)
         self.stop_button.setEnabled(False)
 
-        self.edit_button = QtWidgets.QPushButton("Edit")
+        self.edit_button = QtWidgets.QPushButton("编辑")
         self.edit_button.clicked.connect(self.edit_strategy)
 
-        self.remove_button = QtWidgets.QPushButton("Remove")
+        self.remove_button = QtWidgets.QPushButton("删除")
         self.remove_button.clicked.connect(self.remove_strategy)
 
         strategy_name = self._data["strategy_name"]
@@ -608,7 +669,7 @@ class DataMonitor(QtWidgets.QTableWidget):
 
     def init_ui(self):
         """"""
-        labels = list(self._data.keys())
+        labels = [get_display_name(name) for name in self._data.keys()]
         self.setColumnCount(len(labels))
         self.setHorizontalHeaderLabels(labels)
 
@@ -660,13 +721,13 @@ class SettingEditor(QtWidgets.QDialog):
 
         # Add vt_symbol and name edit if add new strategy
         if self.class_name:
-            self.setWindowTitle(f"Add Strategy：{self.class_name}")
-            button_text = "Confirm"
+            self.setWindowTitle(f"添加策略：{self.class_name}")
+            button_text = "确认"
             parameters = {"strategy_name": "", "vt_symbol": ""}
             parameters.update(self.parameters)
         else:
-            self.setWindowTitle(f"Edit Parameters：{self.strategy_name}")
-            button_text = "Confirm"
+            self.setWindowTitle(f"编辑参数：{self.strategy_name}")
+            button_text = "确认"
             parameters = self.parameters
 
         for name, value in parameters.items():
@@ -680,7 +741,7 @@ class SettingEditor(QtWidgets.QDialog):
                 validator = QtGui.QDoubleValidator()
                 edit.setValidator(validator)
 
-            form.addRow(f"{name} {type_}", edit)
+            form.addRow(f"{get_display_name(name)} {type_}", edit)
 
             self.edits[name] = (edit, type_)
 
@@ -742,7 +803,7 @@ class ConnectDialog(QtWidgets.QDialog):
 
     def init_ui(self) -> None:
         """"""
-        self.setWindowTitle(f"Connect {self.gateway_name}")
+        self.setWindowTitle(f"连接 {self.gateway_name}")
 
         # Default setting provides field name, field data type and field default value.
         default_setting = self.main_engine.get_default_setting(
@@ -772,10 +833,12 @@ class ConnectDialog(QtWidgets.QDialog):
                     saved_value = loaded_setting[field_name]
                     widget.setText(str(saved_value))
 
-            form.addRow(f"{field_name} <{field_type.__name__}>", widget)
+            form.addRow(
+                f"{get_display_name(field_name)} <{field_type.__name__}>", widget
+            )
             self.widgets[field_name] = (widget, field_type)
 
-        button = QtWidgets.QPushButton("Confirm")
+        button = QtWidgets.QPushButton("确认")
         button.clicked.connect(self.connect)
         form.addRow(button)
 

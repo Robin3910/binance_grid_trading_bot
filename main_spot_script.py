@@ -43,8 +43,9 @@ if __name__ == "__main__":
     # before running, remember to paste your api here.
     # 具体配置现货的api key 和 private key 可以参考这个文档 (https://github.com/51bitquant/howtrader/tree/main)
     spot_settings = {
-        "api_key": "paste your api key from binance exchange",
-        "private_key": "paste your private key from asymmetric generator",
+        "api_key": "paste your testnet api key from Binance Spot Test Network",
+        "private_key": "paste your testnet private key from Binance Spot Test Network",
+        "testnet": True,
         "proxy_host": "",
         "proxy_port": 0
     }

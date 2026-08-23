@@ -53,13 +53,17 @@ from gridtrader.trader.constant import LOCAL_TZ
 from gridtrader.trader.setting import SETTINGS
 from gridtrader.trader.object import now_local
 
-# rest api host
+# REST API hosts
 F_REST_HOST: str = "https://fapi.binance.com"
+F_TESTNET_REST_HOST: str = "https://testnet.binancefuture.com"
 
-# ws api host
-F_WEBSOCKET_PUBLIC_HOST: str = 'wss://fstream.binance.com/public/stream'
-F_WEBSOCKET_MARKET_HOST: str = 'wss://fstream.binance.com/market/stream'
-F_WEBSOCKET_PRIVATE_HOST: str = 'wss://fstream.binance.com/private/ws/'
+# Websocket API hosts
+F_WEBSOCKET_PUBLIC_HOST: str = "wss://fstream.binance.com/public/stream"
+F_WEBSOCKET_MARKET_HOST: str = "wss://fstream.binance.com/market/stream"
+F_WEBSOCKET_PRIVATE_HOST: str = "wss://fstream.binance.com/private/ws/"
+F_TESTNET_WEBSOCKET_PUBLIC_HOST: str = "wss://stream.binancefuture.com/public/stream"
+F_TESTNET_WEBSOCKET_MARKET_HOST: str = "wss://stream.binancefuture.com/market/stream"
+F_TESTNET_WEBSOCKET_PRIVATE_HOST: str = "wss://stream.binancefuture.com/private/ws/"
 
 # Order status map
 STATUS_BINANCES2VT: Dict[str, Status] = {
@@ -135,6 +139,7 @@ class BinanceFuturesUsdtGateway(BaseGateway):
     default_setting: Dict[str, Any] = {
         "key": "",
         "secret": "",
+        "testnet": False,
         "proxy_host": "",
         "proxy_port": 0,
     }
@@ -181,9 +186,15 @@ class BinanceFuturesUsdtGateway(BaseGateway):
         else:
             proxy_port: int = 0
 
-        self.rest_api.connect(key, secret, proxy_host, proxy_port)
-        self.market_ws_api.connect(proxy_host, proxy_port)
-        self.public_ws_api.connect(proxy_host, proxy_port)
+        testnet: bool = bool(setting.get("testnet", False))
+        rest_host: str = F_TESTNET_REST_HOST if testnet else F_REST_HOST
+        market_ws_host: str = F_TESTNET_WEBSOCKET_MARKET_HOST if testnet else F_WEBSOCKET_MARKET_HOST
+        public_ws_host: str = F_TESTNET_WEBSOCKET_PUBLIC_HOST if testnet else F_WEBSOCKET_PUBLIC_HOST
+        private_ws_host: str = F_TESTNET_WEBSOCKET_PRIVATE_HOST if testnet else F_WEBSOCKET_PRIVATE_HOST
+
+        self.rest_api.connect(key, secret, rest_host, private_ws_host, proxy_host, proxy_port)
+        self.market_ws_api.connect(market_ws_host, proxy_host, proxy_port)
+        self.public_ws_api.connect(public_ws_host, proxy_host, proxy_port)
 
         self.event_engine.unregister(EVENT_TIMER, self.process_timer_event)
         self.event_engine.register(EVENT_TIMER, self.process_timer_event)
@@ -359,12 +370,15 @@ class BinanceUsdtRestApi(RestClient):
             self,
             key: str,
             secret: str,
+            rest_host: str,
+            private_ws_host: str,
             proxy_host: str,
             proxy_port: int
     ) -> None:
         """connect rest api"""
         self.key = key
         self.secret = secret.encode()
+        self.private_ws_host = private_ws_host
         self.proxy_port = proxy_port
         self.proxy_host = proxy_host
 
@@ -372,7 +386,7 @@ class BinanceUsdtRestApi(RestClient):
                 int(now_local.strftime("%y%m%d%H%M%S")) * self.order_count
         )
 
-        self.init(F_REST_HOST, proxy_host, proxy_port)
+        self.init(rest_host, proxy_host, proxy_port)
 
         self.start()
 
@@ -795,14 +809,29 @@ class BinanceUsdtRestApi(RestClient):
 
             for f in d["filters"]:
                 if f.get("filterType") == "PRICE_FILTER":
-                    tick = str(f["tickSize"]).rstrip("0")
-                    pricetick = Decimal(tick)
+                    raw_tick = f.get("tickSize")
+                    tick = str(raw_tick).rstrip("0").rstrip(".") if raw_tick not in (None, "", "0") else "1"
+                    try:
+                        pricetick = Decimal(tick)
+                    except Exception:
+                        self.gateway.write_log(f"Invalid tickSize for {d.get('symbol')}: {raw_tick}, fallback to 1")
+                        pricetick = Decimal("1")
                 elif f.get("filterType") == "LOT_SIZE":
-                    step = str(f["stepSize"]).rstrip("0")
-                    min_volume = Decimal(step)
+                    raw_step = f.get("stepSize")
+                    step = str(raw_step).rstrip("0").rstrip(".") if raw_step not in (None, "", "0") else "1"
+                    try:
+                        min_volume = Decimal(step)
+                    except Exception:
+                        self.gateway.write_log(f"Invalid stepSize for {d.get('symbol')}: {raw_step}, fallback to 1")
+                        min_volume = Decimal("1")
                 elif f.get('filterType') == 'MIN_NOTIONAL':
-                    notional = str(f.get('notional')).rstrip("0")
-                    min_notional = Decimal(notional)
+                    raw_notional = f.get('notional')
+                    notional = str(raw_notional).rstrip("0").rstrip(".") if raw_notional not in (None, "", "0") else "5"
+                    try:
+                        min_notional = Decimal(notional)
+                    except Exception:
+                        self.gateway.write_log(f"Invalid notional for {d.get('symbol')}: {raw_notional}, fallback to 5")
+                        min_notional = Decimal("5")
 
             contract: ContractData = ContractData(
                 symbol=d["symbol"],
@@ -950,7 +979,7 @@ class BinanceUsdtRestApi(RestClient):
         self.user_stream_key = data["listenKey"]
         self.keep_alive_count = 0
 
-        url = F_WEBSOCKET_PRIVATE_HOST + self.user_stream_key
+        url = self.private_ws_host + self.user_stream_key
         self.private_ws_api.connect(url, self.proxy_host, self.proxy_port)
 
     def on_start_user_stream_failed(self, status_code: int, request: Request):
@@ -1225,13 +1254,9 @@ class BinanceUsdtMarketWebsocketApi(WebsocketClient):
         self.reqid: int = 0
         self.receive_timeout = 60  # 1minute for receiving data timeout.
 
-    def connect(
-            self,
-            proxy_host: str,
-            proxy_port: int,
-    ) -> None:
+    def connect(self, url: str, proxy_host: str, proxy_port: int) -> None:
         """connect market data ws"""
-        self.init(F_WEBSOCKET_MARKET_HOST, proxy_host, proxy_port)
+        self.init(url, proxy_host, proxy_port)
         self.start()
 
     def on_connected(self) -> None:
@@ -1313,13 +1338,9 @@ class BinanceUsdtPublicWebsocketApi(WebsocketClient):
         self.reqid: int = 0
         self.receive_timeout = 60  # 1minute for receiving data timeout.
 
-    def connect(
-            self,
-            proxy_host: str,
-            proxy_port: int,
-    ) -> None:
+    def connect(self, url: str, proxy_host: str, proxy_port: int) -> None:
         """connect public data ws"""
-        self.init(F_WEBSOCKET_PUBLIC_HOST, proxy_host, proxy_port)
+        self.init(url, proxy_host, proxy_port)
         self.start()
 
     def on_connected(self) -> None:
