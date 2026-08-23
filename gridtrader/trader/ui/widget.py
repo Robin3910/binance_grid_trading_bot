@@ -699,7 +699,27 @@ class DataMonitor(QtWidgets.QTableWidget):
 class SettingEditor(QtWidgets.QDialog):
     """
     For creating new strategy and editing strategy parameters.
+
+    弹窗底部会实时计算并展示：
+        - 预计最大投入 USDT = 参考价格 × 最大挂单数量 × 每格数量
+        - 预计每格 USDT = 参考价格 × 每格数量
+        - 每格利润 = (每格价差 / 参考价格) × 100%
+
+    其中：
+        参考价格 = (价格上限 + 价格下限) / 2
+        每格价差 = (价格上限 - 价格下限) / 网格数量
     """
+
+    # 在 SettingEditor 中需要参与计算的参数名
+    COMPUTE_PARAM_NAMES = {"upper_price", "bottom_price", "grid_number", "order_volume", "max_open_orders"}
+
+    # 计算结果展示标签映射
+    COMPUTE_RESULT_LABELS = {
+        "ref_price": "交易对参考价格",
+        "max_invest": "预计最大投入 (USDT)",
+        "per_grid_usdt": "预计每格 (USDT)",
+        "per_grid_profit": "每格利润",
+    }
 
     def __init__(
             self, parameters: dict, strategy_name: str = "", class_name: str = ""
@@ -712,8 +732,12 @@ class SettingEditor(QtWidgets.QDialog):
         self.class_name = class_name
 
         self.edits = {}
+        # 存放只读的计算结果展示控件（QLabel）
+        self.compute_labels = {}
 
         self.init_ui()
+        # 初始化后立刻触发一次计算，让用户一打开就能看到结果
+        self.update_compute_result()
 
     def init_ui(self):
         """"""
@@ -745,6 +769,18 @@ class SettingEditor(QtWidgets.QDialog):
 
             self.edits[name] = (edit, type_)
 
+            # 只要是会参与计算的参数，绑定 textChanged 信号，触发实时计算
+            if name in self.COMPUTE_PARAM_NAMES:
+                edit.textChanged.connect(self.update_compute_result)
+
+        # ---- 实时计算结果展示区 ----
+        for key, display_name in self.COMPUTE_RESULT_LABELS.items():
+            label = QtWidgets.QLabel("-")
+            label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+            label.setStyleSheet("color: #1a73e8;")
+            self.compute_labels[key] = label
+            form.addRow(f"{display_name}", label)
+
         button = QtWidgets.QPushButton(button_text)
         button.clicked.connect(self.accept)
         form.addRow(button)
@@ -759,6 +795,43 @@ class SettingEditor(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout()
         vbox.addWidget(scroll)
         self.setLayout(vbox)
+
+    def update_compute_result(self):
+        """
+        当任意相关输入框变化时，实时刷新底部四个计算字段。
+        任何一个字段为空或非法时，所有结果都置为 '-'。
+        """
+        def get_float(name: str) -> float:
+            edit, _ = self.edits[name]
+            text = edit.text().strip()
+            if not text:
+                raise ValueError(f"{name} empty")
+            return float(text)
+
+        try:
+            upper_price = get_float("upper_price")
+            bottom_price = get_float("bottom_price")
+            grid_number = get_float("grid_number")
+            order_volume = get_float("order_volume")
+            max_open_orders = get_float("max_open_orders")
+
+            # 防御性校验
+            if upper_price <= 0 or bottom_price <= 0 or grid_number <= 0 or order_volume <= 0:
+                raise ValueError("non-positive")
+
+            ref_price = (upper_price + bottom_price) / 2.0
+            max_invest = ref_price * max_open_orders * order_volume
+            per_grid_usdt = ref_price * order_volume
+            step_price = (upper_price - bottom_price) / grid_number
+            per_grid_profit_pct = step_price / ref_price * 100.0
+
+            self.compute_labels["ref_price"].setText(f"{ref_price:.6f}")
+            self.compute_labels["max_invest"].setText(f"{max_invest:.6f}")
+            self.compute_labels["per_grid_usdt"].setText(f"{per_grid_usdt:.6f}")
+            self.compute_labels["per_grid_profit"].setText(f"{per_grid_profit_pct:.4f}%")
+        except Exception:
+            for label in self.compute_labels.values():
+                label.setText("-")
 
     def get_setting(self):
         """"""

@@ -173,6 +173,8 @@ class TradeData(BaseData):
     price: Decimal = Decimal("0")
     volume: Decimal = Decimal("0")
     datetime: datetime = None
+    commission: Decimal = Decimal("0")
+    commission_asset: str = ""
 
     def __post_init__(self) -> None:
         """"""

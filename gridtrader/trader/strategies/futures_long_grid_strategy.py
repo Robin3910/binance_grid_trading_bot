@@ -3,7 +3,7 @@ from ..engine import CtaEngine, EVENT_TIMER
 from gridtrader.trader.object import Status
 from typing import Union, Optional
 from gridtrader.trader.utility import floor_to
-from gridtrader.trader.object import OrderData, TickData, TradeData, ContractData
+from gridtrader.trader.object import OrderData, TickData, TradeData, ContractData, Direction, Offset
 from .template import CtaTemplate
 from gridtrader.trader.utility import GridPositionCalculator
 
@@ -45,6 +45,10 @@ class FuturesLongGridStrategy(CtaTemplate):
     trade_times = 0  # trade times
     initial_entry_filled = False  # whether initial entry order has been submitted
     initial_entry_grid = 0  # grid index where initial entry was placed
+    realized_pnl = 0.0  # 已实现盈亏（仅归属本策略的成交）
+    float_pnl = 0.0  # 浮动盈亏
+    total_commission = 0.0  # 累计手续费（折算 USDT）
+    total_pnl = 0.0  # 合计 = realized_pnl + float_pnl - total_commission
 
     parameters = [
         "upper_price",
@@ -61,6 +65,10 @@ class FuturesLongGridStrategy(CtaTemplate):
         "trade_times",
         "initial_entry_filled",
         "initial_entry_grid",
+        "realized_pnl",
+        "float_pnl",
+        "total_commission",
+        "total_pnl",
     ]
 
     def __init__(self, cta_engine: CtaEngine, strategy_name, vt_symbol, setting):
@@ -77,6 +85,12 @@ class FuturesLongGridStrategy(CtaTemplate):
 
         self.pos_calculator = GridPositionCalculator()
         self.timer_count = 0
+
+        # ---- 多策略盈亏归属 ----
+        # 记录本策略所有下过的 vt_orderid，用于 on_trade 里过滤
+        self.my_order_ids: set = set()
+        # 合约面值（USDT 永续合约通常 trade.price * trade.volume * contract_size = 名义额）
+        self.contract_size: float = 0.0
 
     def on_init(self):
         """
@@ -96,6 +110,7 @@ class FuturesLongGridStrategy(CtaTemplate):
             self.inited = False
         else:
             self.inited = True
+            self.contract_size = float(self.contract_data.size or 0)
 
         self.pos_calculator.pos = self.pos
         self.pos_calculator.avg_price = self.avg_price
@@ -209,6 +224,10 @@ class FuturesLongGridStrategy(CtaTemplate):
         """
         Callback of new order data update.
         """
+        # 凡是本策略自己下过的单（被引擎回报回来的），都登记到归属集合
+        # 这样 on_trade 里就能用 orderid 精确过滤归属
+        self.my_order_ids.add(order.vt_orderid)
+
         is_initial_entry = order.vt_orderid in self.initial_entry_order_ids
 
         if order.vt_orderid not in (list(self.sell_orders_dict.keys()) + list(self.long_orders_dict.keys())):
@@ -291,5 +310,43 @@ class FuturesLongGridStrategy(CtaTemplate):
     def on_trade(self, trade: TradeData):
         """
         Callback of new trade data update.
+
+        多策略归属：只用本策略下过的订单产生的成交来累计 realized_pnl / commission。
+        浮动盈亏用最新 tick 算。
         """
+        if trade.vt_orderid not in self.my_order_ids:
+            return
+
+        # 1) 已实现盈亏：只在平仓那一笔算
+        #    只做多网格里：
+        #      - 平多 = direction SHORT & offset CLOSE  → 盈利 = (卖价 - 均价) * 量 * 面值
+        if trade.offset == Offset.CLOSE and self.avg_price > 0 and self.contract_size > 0:
+            if trade.direction == Direction.SHORT:
+                pnl = (float(trade.price) - float(self.avg_price)) * float(trade.volume) * self.contract_size
+                self.realized_pnl += pnl
+            elif trade.direction == Direction.LONG:
+                pnl = (float(self.avg_price) - float(trade.price)) * float(trade.volume) * self.contract_size
+                self.realized_pnl += pnl
+
+        # 2) 累计手续费：开仓/平仓每笔都收
+        commission = float(trade.commission or 0)
+        if commission > 0 and trade.commission_asset and trade.commission_asset != "USDT":
+            # 手续费扣的是标的币（如 BTC/BNB），按成交价折算 USDT
+            commission = commission * float(trade.price)
+        self.total_commission += commission
+
+        # 3) 浮动盈亏：用最新 tick + 当前持仓均价
+        if self.tick and self.pos and self.avg_price > 0 and self.contract_size > 0:
+            if self.pos > 0:
+                self.float_pnl = (float(self.tick.bid_price_1) - float(self.avg_price)) * self.pos * self.contract_size
+            elif self.pos < 0:
+                self.float_pnl = (float(self.avg_price) - float(self.tick.ask_price_1)) * abs(self.pos) * self.contract_size
+            else:
+                self.float_pnl = 0.0
+        else:
+            self.float_pnl = 0.0
+
+        # 4) 合计 = 已实现 + 浮动 - 累计手续费
+        self.total_pnl = self.realized_pnl + self.float_pnl - self.total_commission
+
         self.put_event()
