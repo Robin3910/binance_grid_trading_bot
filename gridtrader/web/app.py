@@ -5,6 +5,8 @@ Web Dashboard Application for Grid Trader
 """
 
 import logging
+import os
+from pathlib import Path
 from threading import Thread
 
 from flask import Flask, render_template, jsonify, request, redirect, url_for
@@ -31,10 +33,14 @@ class WebDashboard:
         self.host = host
         self.port = port
         
+        base_dir = Path(__file__).parent
+        template_dir = base_dir / 'templates'
+        static_dir = base_dir / 'static'
+        
         self.app = Flask(
             __name__,
-            template_folder='gridtrader/web/templates',
-            static_folder='gridtrader/web/static'
+            template_folder=str(template_dir),
+            static_folder=str(static_dir)
         )
         
         self._setup_routes()
@@ -187,6 +193,27 @@ class WebDashboard:
                     for acc in accounts
                 ]
             })
+        
+        @app.route('/api/gateways')
+        def api_gateways():
+            """获取所有网关及其默认设置"""
+            gateways = []
+            for name in self.main_engine.get_all_gateway_names():
+                gateway = self.main_engine.get_gateway(name)
+                default_setting = self.main_engine.get_default_setting(name)
+                gateways.append({
+                    'name': name,
+                    'connected': gateway.connected if hasattr(gateway, 'connected') else False,
+                    'default_setting': default_setting or {}
+                })
+            return jsonify({'gateways': gateways})
+        
+        @app.route('/api/gateways/<gateway_name>/connect', methods=['POST'])
+        def api_connect_gateway(gateway_name):
+            """连接网关"""
+            data = request.json
+            self.main_engine.connect(data, gateway_name)
+            return jsonify({'success': True, 'gateway': gateway_name})
         
         @app.route('/api/positions')
         def api_positions():

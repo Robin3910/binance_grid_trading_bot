@@ -23,6 +23,10 @@
                 <div id="accounts-container" class="accounts-grid">
                     <div class="loading">Loading...</div>
                 </div>
+                <div class="gateway-bar">
+                    <span id="gateway-status"></span>
+                    <button onclick="showGatewayModal()" class="btn-config">⚙️ Configure API</button>
+                </div>
             </section>
 
             <!-- 策略管理 -->
@@ -125,6 +129,24 @@
         </div>
     </div>
 
+    <!-- 网关配置弹窗 -->
+    <div id="gateway-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('gateway-modal')">&times;</span>
+            <h2>Configure Exchange API</h2>
+            <form id="gateway-form">
+                <div class="form-group">
+                    <label>Exchange</label>
+                    <select id="gateway-select" onchange="onGatewaySelect()">
+                        <option value="">Select Exchange</option>
+                    </select>
+                </div>
+                <div id="gateway-fields"></div>
+                <button type="submit" class="btn-submit">Connect</button>
+            </form>
+        </div>
+    </div>
+
     <script>
         // API Base URL
         const API_BASE = '';
@@ -132,19 +154,22 @@
         // Global state
         let currentEditingStrategy = null;
         let strategyClasses = [];
+        let gateways = [];
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            loadGateways();
             loadStrategyClasses();
             loadStatus();
-            
+
             // Auto refresh every 5 seconds
             setInterval(loadStatus, 5000);
-            
+
             // Setup form handlers
             document.getElementById('add-strategy-form').addEventListener('submit', handleAddStrategy);
             document.getElementById('edit-strategy-form').addEventListener('submit', handleEditStrategy);
-            
+            document.getElementById('gateway-form').addEventListener('submit', handleGatewayConnect);
+
             // Strategy class select change
             document.getElementById('strategy-class-select').addEventListener('change', handleClassSelectChange);
         });
@@ -164,6 +189,120 @@
                 console.error('API Error:', error);
                 return null;
             }
+        }
+
+        // Gateway Functions
+        async function loadGateways() {
+            const result = await api('/api/gateways');
+            if (result && result.data) {
+                gateways = result.data.gateways || [];
+                updateGatewayStatus();
+                updateGatewaySelect();
+            }
+        }
+
+        function updateGatewayStatus() {
+            const statusEl = document.getElementById('gateway-status');
+            const connected = gateways.filter(g => g.connected);
+            if (connected.length > 0) {
+                statusEl.innerHTML = connected.map(g =>
+                    `<span class="gateway-badge connected">${g.name}: Connected</span>`
+                ).join(' ');
+            } else {
+                statusEl.innerHTML = '<span class="gateway-badge disconnected">No exchanges connected</span>';
+            }
+        }
+
+        function updateGatewaySelect() {
+            const select = document.getElementById('gateway-select');
+            select.innerHTML = '<option value="">Select Exchange</option>';
+            gateways.forEach(gw => {
+                const option = document.createElement('option');
+                option.value = gw.name;
+                option.textContent = gw.name + (gw.connected ? ' (Connected)' : '');
+                select.appendChild(option);
+            });
+        }
+
+        function onGatewaySelect() {
+            const gatewayName = document.getElementById('gateway-select').value;
+            if (!gatewayName) {
+                document.getElementById('gateway-fields').innerHTML = '';
+                return;
+            }
+
+            const gateway = gateways.find(g => g.name === gatewayName);
+            if (!gateway) return;
+
+            const fieldsContainer = document.getElementById('gateway-fields');
+            fieldsContainer.innerHTML = '';
+
+            const defaultSetting = gateway.default_setting || {};
+            Object.entries(defaultSetting).forEach(([key, value]) => {
+                const div = document.createElement('div');
+                div.className = 'form-group';
+
+                const inputType = typeof value === 'boolean' ? 'checkbox' :
+                                 typeof value === 'number' ? 'number' : 'text';
+                const inputId = `gateway-${key}`;
+
+                if (inputType === 'checkbox') {
+                    div.innerHTML = `
+                        <label>
+                            <input type="checkbox" id="${inputId}" ${value ? 'checked' : ''}>
+                            ${key}
+                        </label>
+                    `;
+                } else {
+                    div.innerHTML = `
+                        <label>${key}</label>
+                        <input type="${inputType}"
+                               id="${inputId}"
+                               value="${value}"
+                               placeholder="${key}">
+                    `;
+                }
+                fieldsContainer.appendChild(div);
+            });
+        }
+
+        async function handleGatewayConnect(e) {
+            e.preventDefault();
+            const gatewayName = document.getElementById('gateway-select').value;
+            if (!gatewayName) return;
+
+            const gateway = gateways.find(g => g.name === gatewayName);
+            const settings = {};
+
+            const defaultSetting = gateway.default_setting || {};
+            Object.keys(defaultSetting).forEach(key => {
+                const input = document.getElementById(`gateway-${key}`);
+                if (!input) return;
+
+                if (input.type === 'checkbox') {
+                    settings[key] = input.checked;
+                } else if (typeof defaultSetting[key] === 'number') {
+                    settings[key] = parseFloat(input.value) || 0;
+                } else {
+                    settings[key] = input.value;
+                }
+            });
+
+            const result = await api(`/api/gateways/${gatewayName}/connect`, {
+                method: 'POST',
+                body: JSON.stringify(settings)
+            });
+
+            if (result && result.success) {
+                alert(`${gatewayName} connection initiated! Please wait for the connection to establish.`);
+                closeModal('gateway-modal');
+                loadStatus();
+                setTimeout(loadGateways, 3000);
+            }
+        }
+
+        function showGatewayModal() {
+            document.getElementById('gateway-modal').style.display = 'block';
         }
 
         async function loadStrategyClasses() {
