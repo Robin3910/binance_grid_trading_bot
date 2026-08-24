@@ -7,3 +7,5 @@ six==1.13.0
 wheel
 cryptography
 aiohttp
+flask>=2.0.0
+pyyaml>=5.0.0

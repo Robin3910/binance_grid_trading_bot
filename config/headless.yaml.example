@@ -1,0 +1,74 @@
+# Grid Trader Headless Service Configuration
+#
+# Copy this file to headless.yaml and configure your settings
+#
+
+# ============================================================
+# Server Configuration
+# ============================================================
+server:
+  # API Server
+  host: "0.0.0.0"
+  api_port: 8765
+  
+  # WebSocket Server (uses same port as API)
+  ws_port: 8766
+  
+  # Web Dashboard
+  enable_web: true
+  web_port: 8080
+
+# ============================================================
+# Binance Connection Configuration
+# ============================================================
+binance:
+  # Spot Trading Settings
+  spot:
+    api_key: ""              # Or use env: BINANCE_SPOT_API_KEY
+    private_key: ""          # Or use env: BINANCE_SPOT_PRIVATE_KEY
+    testnet: false
+    proxy_host: ""           # e.g., "127.0.0.1"
+    proxy_port: 0            # e.g., 1080
+  
+  # Futures Trading Settings
+  futures:
+    key: ""                  # Or use env: BINANCE_FUTURES_KEY
+    secret: ""               # Or use env: BINANCE_FUTURES_SECRET
+    testnet: false
+    proxy_host: ""
+    proxy_port: 0
+
+# ============================================================
+# Strategy Configuration
+# ============================================================
+strategy:
+  # Auto initialize all strategies on startup
+  auto_init: false
+  
+  # Auto start all strategies after initialization
+  auto_start: false
+
+# ============================================================
+# Logging Configuration
+# ============================================================
+logging:
+  level: INFO              # DEBUG, INFO, WARNING, ERROR
+  console: true            # Print logs to stdout
+  file: true               # Save logs to file
+  path: "logs/"
+
+# ============================================================
+# OMS (Order Management System) Configuration
+# ============================================================
+oms:
+  # Interval for querying order status (seconds)
+  order_update_interval: 120
+  
+  # Timeout for orders to be considered stuck (seconds)
+  order_update_timer: 120
+  
+  # Interval for querying positions (seconds)
+  position_update_interval: 120
+  
+  # Interval for querying accounts (seconds)
+  account_update_interval: 120

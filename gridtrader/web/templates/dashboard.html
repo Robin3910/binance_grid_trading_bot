@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binance Grid Trader Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Binance Grid Trader</h1>
+            <div class="header-actions">
+                <span id="connection-status" class="status-indicator">Connecting...</span>
+                <button onclick="refreshAll()" class="btn-refresh">🔄 Refresh</button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- 账户概览 -->
+            <section class="card accounts-section">
+                <h2>💰 账户概览</h2>
+                <div id="accounts-container" class="accounts-grid">
+                    <div class="loading">Loading...</div>
+                </div>
+            </section>
+
+            <!-- 策略管理 -->
+            <section class="card strategies-section">
+                <div class="section-header">
+                    <h2>📈 策略管理</h2>
+                    <div class="strategy-actions">
+                        <select id="strategy-class-select" class="select-class">
+                            <option value="">Select Strategy Class</option>
+                        </select>
+                        <button onclick="showAddStrategyModal()" class="btn-add">+ Add Strategy</button>
+                    </div>
+                </div>
+                
+                <div class="strategy-controls">
+                    <button onclick="initAllStrategies()" class="btn-control">Initialize All</button>
+                    <button onclick="startAllStrategies()" class="btn-control btn-start">Start All</button>
+                    <button onclick="stopAllStrategies()" class="btn-control btn-stop">Stop All</button>
+                </div>
+
+                <div id="strategies-container" class="strategies-list">
+                    <div class="loading">Loading...</div>
+                </div>
+            </section>
+
+            <!-- 持仓和订单 -->
+            <div class="bottom-grid">
+                <section class="card positions-section">
+                    <h2>📋 持仓信息</h2>
+                    <div id="positions-container" class="data-table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th>Volume</th>
+                                    <th>Price</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-tbody">
+                                <tr><td colspan="4" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="card orders-section">
+                    <h2>📝 活动订单</h2>
+                    <div id="orders-container" class="data-table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Direction</th>
+                                    <th>Price</th>
+                                    <th>Volume</th>
+                                    <th>Traded</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orders-tbody">
+                                <tr><td colspan="6" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加策略弹窗 -->
+    <div id="add-strategy-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('add-strategy-modal')">&times;</span>
+            <h2>Add New Strategy</h2>
+            <form id="add-strategy-form">
+                <div class="form-group">
+                    <label>Strategy Name</label>
+                    <input type="text" id="new-strategy-name" required placeholder="e.g., BTCGrid01">
+                </div>
+                <div class="form-group">
+                    <label>Trading Symbol</label>
+                    <input type="text" id="new-strategy-symbol" required placeholder="e.g., BTCUSDT">
+                </div>
+                <div id="dynamic-params"></div>
+                <button type="submit" class="btn-submit">Add Strategy</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 编辑策略弹窗 -->
+    <div id="edit-strategy-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('edit-strategy-modal')">&times;</span>
+            <h2>Edit Strategy: <span id="edit-strategy-name"></span></h2>
+            <form id="edit-strategy-form">
+                <div id="edit-dynamic-params"></div>
+                <button type="submit" class="btn-submit">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // API Base URL
+        const API_BASE = '';
+
+        // Global state
+        let currentEditingStrategy = null;
+        let strategyClasses = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStrategyClasses();
+            loadStatus();
+            
+            // Auto refresh every 5 seconds
+            setInterval(loadStatus, 5000);
+            
+            // Setup form handlers
+            document.getElementById('add-strategy-form').addEventListener('submit', handleAddStrategy);
+            document.getElementById('edit-strategy-form').addEventListener('submit', handleEditStrategy);
+            
+            // Strategy class select change
+            document.getElementById('strategy-class-select').addEventListener('change', handleClassSelectChange);
+        });
+
+        // API Functions
+        async function api(endpoint, options = {}) {
+            try {
+                const response = await fetch(API_BASE + endpoint, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+                return await response.json();
+            } catch (error) {
+                console.error('API Error:', error);
+                return null;
+            }
+        }
+
+        async function loadStrategyClasses() {
+            const result = await api('/api/strategy-classes');
+            if (result && result.data) {
+                strategyClasses = result.data.classes || [];
+                updateStrategyClassSelect();
+            }
+        }
+
+        function updateStrategyClassSelect() {
+            const select = document.getElementById('strategy-class-select');
+            select.innerHTML = '<option value="">Select Strategy Class</option>';
+            strategyClasses.forEach(cls => {
+                const option = document.createElement('option');
+                option.value = cls.class_name;
+                option.textContent = cls.class_name;
+                option.dataset.params = JSON.stringify(cls.parameters);
+                select.appendChild(option);
+            });
+        }
+
+        async function loadStatus() {
+            const result = await api('/api/status');
+            if (result) {
+                updateConnectionStatus(true);
+                renderAccounts(result.accounts || []);
+                renderStrategies(result.strategies || []);
+                renderPositions(result.positions || []);
+                renderOrders();
+            } else {
+                updateConnectionStatus(false);
+            }
+        }
+
+        async function loadOrders() {
+            const result = await api('/api/orders');
+            if (result && result.data) {
+                renderOrdersTable(result.data.orders || []);
+            }
+        }
+
+        function renderOrdersTable(orders) {
+            const tbody = document.getElementById('orders-tbody');
+            if (orders.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders</td></tr>';
+                return;
+            }
+            tbody.innerHTML = orders.map(order => `
+                <tr>
+                    <td>${order.symbol}</td>
+                    <td class="${order.direction.includes('LONG') ? 'long' : 'short'}">${order.direction}</td>
+                    <td>${order.price.toFixed(4)}</td>
+                    <td>${order.volume.toFixed(4)}</td>
+                    <td>${order.traded.toFixed(4)}</td>
+                    <td><span class="status-badge ${order.status.toLowerCase()}">${order.status}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connection-status');
+            status.textContent = connected ? '🟢 Connected' : '🔴 Disconnected';
+            status.className = 'status-indicator ' + (connected ? 'connected' : 'disconnected');
+        }
+
+        function renderAccounts(accounts) {
+            const container = document.getElementById('accounts-container');
+            if (accounts.length === 0) {
+                container.innerHTML = '<div class="empty">No accounts connected</div>';
+                return;
+            }
+            container.innerHTML = accounts.map(acc => `
+                <div class="account-card">
+                    <div class="account-gateway">${acc.gateway}</div>
+                    <div class="account-balance">${acc.balance.toFixed(4)}</div>
+                    <div class="account-frozen">Frozen: ${acc.frozen.toFixed(4)}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderStrategies(strategies) {
+            const container = document.getElementById('strategies-container');
+            if (strategies.length === 0) {
+                container.innerHTML = '<div class="empty">No strategies. Add one to get started!</div>';
+                return;
+            }
+            container.innerHTML = strategies.map(s => `
+                <div class="strategy-card ${s.trading ? 'trading' : ''}">
+                    <div class="strategy-header">
+                        <div class="strategy-name">${s.name}</div>
+                        <div class="strategy-status ${s.trading ? 'status-trading' : 'status-stopped'}">
+                            ${s.trading ? '🟢 Trading' : '🔴 Stopped'}
+                        </div>
+                    </div>
+                    <div class="strategy-info">
+                        <div class="strategy-symbol">${s.symbol}</div>
+                        <div class="strategy-class">${s.class_name}</div>
+                    </div>
+                    <div class="strategy-pos">Position: ${s.pos}</div>
+                    <div class="strategy-actions">
+                        ${!s.inited ? `<button onclick="initStrategy('${s.name}')">Init</button>` : ''}
+                        ${s.inited && !s.trading ? `<button onclick="startStrategy('${s.name}')" class="btn-start">Start</button>` : ''}
+                        ${s.trading ? `<button onclick="stopStrategy('${s.name}')" class="btn-stop">Stop</button>` : ''}
+                        ${!s.trading ? `
+                            <button onclick="showEditModal('${s.name}')">Edit</button>
+                            <button onclick="removeStrategy('${s.name}')" class="btn-remove">Remove</button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderPositions(positions) {
+            const tbody = document.getElementById('positions-tbody');
+            if (positions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="empty">No positions</td></tr>';
+                return;
+            }
+            tbody.innerHTML = positions.map(pos => `
+                <tr>
+                    <td>${pos.symbol}</td>
+                    <td class="${pos.direction.includes('LONG') ? 'long' : 'short'}">${pos.direction}</td>
+                    <td>${pos.volume.toFixed(4)}</td>
+                    <td>${pos.price.toFixed(4)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderOrders() {
+            loadOrders();
+        }
+
+        // Strategy Actions
+        async function initStrategy(name) {
+            await api(`/api/strategies/${name}/init`, { method: 'POST' });
+            loadStatus();
+        }
+
+        async function startStrategy(name) {
+            await api(`/api/strategies/${name}/start`, { method: 'POST' });
+            loadStatus();
+        }
+
+        async function stopStrategy(name) {
+            await api(`/api/strategies/${name}/stop`, { method: 'POST' });
+            loadStatus();
+        }
+
+        async function removeStrategy(name) {
+            if (!confirm(`Are you sure you want to remove strategy '${name}'?`)) return;
+            await api(`/api/strategies/${name}`, { method: 'DELETE' });
+            loadStatus();
+        }
+
+        async function initAllStrategies() {
+            const result = await api('/api/strategies');
+            if (result && result.data) {
+                for (const s of result.data.strategies) {
+                    if (!s.variables.inited) {
+                        await api(`/api/strategies/${s.strategy_name}/init`, { method: 'POST' });
+                    }
+                }
+                loadStatus();
+            }
+        }
+
+        async function startAllStrategies() {
+            const result = await api('/api/strategies');
+            if (result && result.data) {
+                for (const s of result.data.strategies) {
+                    if (s.variables.inited && !s.variables.trading) {
+                        await api(`/api/strategies/${s.strategy_name}/start`, { method: 'POST' });
+                    }
+                }
+                loadStatus();
+            }
+        }
+
+        async function stopAllStrategies() {
+            const result = await api('/api/strategies');
+            if (result && result.data) {
+                for (const s of result.data.strategies) {
+                    if (s.variables.trading) {
+                        await api(`/api/strategies/${s.strategy_name}/stop`, { method: 'POST' });
+                    }
+                }
+                loadStatus();
+            }
+        }
+
+        // Modal Functions
+        function showAddStrategyModal() {
+            const className = document.getElementById('strategy-class-select').value;
+            if (!className) {
+                alert('Please select a strategy class first');
+                return;
+            }
+            
+            const cls = strategyClasses.find(c => c.class_name === className);
+            if (!cls) return;
+
+            const paramsContainer = document.getElementById('dynamic-params');
+            paramsContainer.innerHTML = '';
+            
+            Object.entries(cls.parameters).forEach(([key, value]) => {
+                if (key === 'strategy_name' || key === 'vt_symbol') return;
+                
+                const div = document.createElement('div');
+                div.className = 'form-group';
+                div.innerHTML = `
+                    <label>${key} ${key === 'strategy_name' || key === 'vt_symbol' ? '(auto)' : ''}</label>
+                    <input type="${typeof value === 'number' ? 'number' : 'text'}" 
+                           name="${key}" 
+                           value="${value}"
+                           step="any">
+                `;
+                paramsContainer.appendChild(div);
+            });
+            
+            document.getElementById('add-strategy-modal').style.display = 'block';
+        }
+
+        function handleClassSelectChange() {
+            // Auto-fill strategy name suggestion based on class
+            const className = document.getElementById('strategy-class-select').value;
+            if (className) {
+                const timestamp = Date.now().toString().slice(-4);
+                document.getElementById('new-strategy-name').value = `${className.replace('Strategy', '')}${timestamp}`;
+            }
+        }
+
+        async function handleAddStrategy(e) {
+            e.preventDefault();
+            
+            const className = document.getElementById('strategy-class-select').value;
+            const strategyName = document.getElementById('new-strategy-name').value;
+            const symbol = document.getElementById('new-strategy-symbol').value;
+            
+            const params = {};
+            const formData = new FormData(e.target);
+            for (const [key, value] of formData.entries()) {
+                if (value) {
+                    params[key] = isNaN(value) ? value : parseFloat(value);
+                }
+            }
+            
+            const result = await api('/api/strategies', {
+                method: 'POST',
+                body: JSON.stringify({
+                    class_name: className,
+                    strategy_name: strategyName,
+                    vt_symbol: symbol,
+                    setting: params
+                })
+            });
+            
+            if (result && result.code === 0) {
+                closeModal('add-strategy-modal');
+                loadStatus();
+            } else {
+                alert('Failed to add strategy: ' + (result ? result.message : 'Unknown error'));
+            }
+        }
+
+        async function showEditModal(strategyName) {
+            const result = await api(`/api/strategies/${strategyName}`);
+            if (!result || !result.data) return;
+            
+            currentEditingStrategy = strategyName;
+            const strategy = result.data;
+            
+            document.getElementById('edit-strategy-name').textContent = strategyName;
+            
+            const paramsContainer = document.getElementById('edit-dynamic-params');
+            paramsContainer.innerHTML = '';
+            
+            Object.entries(strategy.parameters).forEach(([key, value]) => {
+                const div = document.createElement('div');
+                div.className = 'form-group';
+                div.innerHTML = `
+                    <label>${key}</label>
+                    <input type="${typeof value === 'number' ? 'number' : 'text'}" 
+                           name="${key}" 
+                           value="${value}"
+                           step="any">
+                `;
+                paramsContainer.appendChild(div);
+            });
+            
+            document.getElementById('edit-strategy-modal').style.display = 'block';
+        }
+
+        async function handleEditStrategy(e) {
+            e.preventDefault();
+            
+            const params = {};
+            const formData = new FormData(e.target);
+            for (const [key, value] of formData.entries()) {
+                if (value) {
+                    params[key] = isNaN(value) ? value : parseFloat(value);
+                }
+            }
+            
+            await api(`/api/strategies/${currentEditingStrategy}`, {
+                method: 'PUT',
+                body: JSON.stringify({ setting: params })
+            });
+            
+            closeModal('edit-strategy-modal');
+            loadStatus();
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function refreshAll() {
+            loadStatus();
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

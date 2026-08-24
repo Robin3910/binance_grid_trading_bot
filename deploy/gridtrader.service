@@ -1,0 +1,46 @@
+[Unit]
+Description=Binance Grid Trader Headless Service
+Documentation=https://github.com/your-repo/binance_grid_trader
+After=network.target
+
+[Service]
+Type=simple
+User=gridtrader
+Group=gridtrader
+
+# Working directory
+WorkingDirectory=/opt/gridtrader
+
+# Python executable
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# API Keys (recommended: use environment variables)
+Environment="BINANCE_SPOT_API_KEY=your_spot_api_key"
+Environment="BINANCE_SPOT_PRIVATE_KEY=your_spot_private_key"
+Environment="BINANCE_FUTURES_KEY=your_futures_key"
+Environment="BINANCE_FUTURES_SECRET=your_futures_secret"
+
+# Start command
+ExecStart=/usr/bin/python3 /opt/gridtrader/main_headless.py \
+    --config /opt/gridtrader/config/headless.yaml
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gridtrader/logs /opt/gridtrader/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gridtrader
+
+[Install]
+WantedBy=multi-user.target
