@@ -265,6 +265,10 @@ class LogEngine(BaseEngine):
             "%(asctime)s  %(levelname)s: %(message)s"
         )
 
+        # 内存日志缓冲区
+        self._log_buffer = []
+        self._max_buffer_size = 500
+
         self.add_null_handler()
 
         if SETTINGS["log.console"]:
@@ -317,6 +321,24 @@ class LogEngine(BaseEngine):
         """
         log = event.data
         self.logger.log(log.level, log.msg)
+
+        # 存储到内存缓冲区
+        self._log_buffer.append({
+            'time': log.gateway_name or 'system',
+            'msg': log.msg,
+            'level': log.level,
+            'timestamp': str(log.datetime) if hasattr(log, 'datetime') and log.datetime else None
+        })
+
+        # 限制缓冲区大小
+        if len(self._log_buffer) > self._max_buffer_size:
+            self._log_buffer = self._log_buffer[-self._max_buffer_size:]
+
+    def get_recent_logs(self, limit: int = 50) -> list:
+        """
+        Get recent logs from buffer.
+        """
+        return self._log_buffer[-limit:]
 
 
 class OmsEngine(BaseEngine):

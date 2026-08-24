@@ -34,13 +34,13 @@
                 <div class="section-header">
                     <h2>📈 策略管理</h2>
                     <div class="strategy-actions">
-                        <select id="strategy-class-select" class="select-class">
+                        <select id="strategy-class-select" class="select-class" onchange="onStrategyClassChange()">
                             <option value="">Select Strategy Class</option>
                         </select>
                         <button onclick="showAddStrategyModal()" class="btn-add">+ Add Strategy</button>
                     </div>
                 </div>
-                
+
                 <div class="strategy-controls">
                     <button onclick="initAllStrategies()" class="btn-control">Initialize All</button>
                     <button onclick="startAllStrategies()" class="btn-control btn-start">Start All</button>
@@ -85,33 +85,48 @@
                                     <th>Volume</th>
                                     <th>Traded</th>
                                     <th>Status</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody id="orders-tbody">
-                                <tr><td colspan="6" class="loading">Loading...</td></tr>
+                                <tr><td colspan="7" class="loading">Loading...</td></tr>
                             </tbody>
                         </table>
                     </div>
                 </section>
             </div>
+
+            <!-- 日志区域 -->
+            <section class="card log-section">
+                <div class="log-header">
+                    <h2>📜 日志</h2>
+                    <button onclick="clearLogs()" class="btn-clear">Clear</button>
+                </div>
+                <div id="log-container" class="log-container">
+                    <div class="loading">Loading...</div>
+                </div>
+            </section>
         </div>
     </div>
 
     <!-- 添加策略弹窗 -->
     <div id="add-strategy-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-large">
             <span class="close" onclick="closeModal('add-strategy-modal')">&times;</span>
             <h2>Add New Strategy</h2>
             <form id="add-strategy-form">
-                <div class="form-group">
-                    <label>Strategy Name</label>
-                    <input type="text" id="new-strategy-name" required placeholder="e.g., BTCGrid01">
-                </div>
-                <div class="form-group">
-                    <label>Trading Symbol</label>
-                    <input type="text" id="new-strategy-symbol" required placeholder="e.g., BTCUSDT">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Strategy Name</label>
+                        <input type="text" id="new-strategy-name" required placeholder="e.g., BTCGrid01">
+                    </div>
+                    <div class="form-group">
+                        <label>Trading Symbol</label>
+                        <input type="text" id="new-strategy-symbol" required placeholder="e.g., BTCUSDT">
+                    </div>
                 </div>
                 <div id="dynamic-params"></div>
+                <div id="compute-result" class="compute-result"></div>
                 <button type="submit" class="btn-submit">Add Strategy</button>
             </form>
         </div>
@@ -119,7 +134,7 @@
 
     <!-- 编辑策略弹窗 -->
     <div id="edit-strategy-modal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-large">
             <span class="close" onclick="closeModal('edit-strategy-modal')">&times;</span>
             <h2>Edit Strategy: <span id="edit-strategy-name"></span></h2>
             <form id="edit-strategy-form">
@@ -155,23 +170,24 @@
         let currentEditingStrategy = null;
         let strategyClasses = [];
         let gateways = [];
+        let logs = [];
+        let computeParams = ['upper_price', 'bottom_price', 'grid_number', 'order_volume', 'max_open_orders'];
 
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             loadGateways();
             loadStrategyClasses();
             loadStatus();
+            loadLogs();
 
-            // Auto refresh every 5 seconds
-            setInterval(loadStatus, 5000);
+            // Auto refresh every 3 seconds
+            setInterval(loadStatus, 3000);
+            setInterval(loadLogs, 3000);
 
             // Setup form handlers
             document.getElementById('add-strategy-form').addEventListener('submit', handleAddStrategy);
             document.getElementById('edit-strategy-form').addEventListener('submit', handleEditStrategy);
             document.getElementById('gateway-form').addEventListener('submit', handleGatewayConnect);
-
-            // Strategy class select change
-            document.getElementById('strategy-class-select').addEventListener('change', handleClassSelectChange);
         });
 
         // API Functions
@@ -191,7 +207,7 @@
             }
         }
 
-        // Gateway Functions
+        // ========== Gateway Functions ==========
         async function loadGateways() {
             const result = await api('/api/gateways');
             if (result && result.data) {
@@ -239,30 +255,37 @@
 
             const defaultSetting = gateway.default_setting || {};
             Object.entries(defaultSetting).forEach(([key, value]) => {
-                const div = document.createElement('div');
-                div.className = 'form-group';
-
-                const inputType = typeof value === 'boolean' ? 'checkbox' :
-                                 typeof value === 'number' ? 'number' : 'text';
-                const inputId = `gateway-${key}`;
-
-                if (inputType === 'checkbox') {
+                if (key === 'api_key' || key === 'key') {
+                    // API Key 字段使用密码类型
+                    const div = document.createElement('div');
+                    div.className = 'form-group';
                     div.innerHTML = `
-                        <label>
-                            <input type="checkbox" id="${inputId}" ${value ? 'checked' : ''}>
-                            ${key}
+                        <label>${key} ${key === 'api_key' || key === 'key' ? '(API Key)' : ''}</label>
+                        <input type="password" id="gateway-${key}" value="${value}" placeholder="Enter ${key}">
+                    `;
+                    fieldsContainer.appendChild(div);
+                } else if (typeof value === 'boolean') {
+                    const div = document.createElement('div');
+                    div.className = 'form-group';
+                    div.innerHTML = `
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="gateway-${key}" ${value ? 'checked' : ''}>
+                            ${key} (${key === 'testnet' ? 'Use Testnet' : key})
                         </label>
                     `;
+                    fieldsContainer.appendChild(div);
                 } else {
+                    const div = document.createElement('div');
+                    div.className = 'form-group';
                     div.innerHTML = `
                         <label>${key}</label>
-                        <input type="${inputType}"
-                               id="${inputId}"
+                        <input type="${typeof value === 'number' ? 'number' : 'text'}"
+                               id="gateway-${key}"
                                value="${value}"
-                               placeholder="${key}">
+                               step="any">
                     `;
+                    fieldsContainer.appendChild(div);
                 }
-                fieldsContainer.appendChild(div);
             });
         }
 
@@ -305,6 +328,7 @@
             document.getElementById('gateway-modal').style.display = 'block';
         }
 
+        // ========== Strategy Class Functions ==========
         async function loadStrategyClasses() {
             const result = await api('/api/strategy-classes');
             if (result && result.data) {
@@ -325,6 +349,16 @@
             });
         }
 
+        function onStrategyClassChange() {
+            // Auto-fill strategy name suggestion based on class
+            const className = document.getElementById('strategy-class-select').value;
+            if (className) {
+                const timestamp = Date.now().toString().slice(-4);
+                document.getElementById('new-strategy-name').value = `${className.replace('Strategy', '')}${timestamp}`;
+            }
+        }
+
+        // ========== Status Functions ==========
         async function loadStatus() {
             const result = await api('/api/status');
             if (result) {
@@ -332,35 +366,10 @@
                 renderAccounts(result.accounts || []);
                 renderStrategies(result.strategies || []);
                 renderPositions(result.positions || []);
-                renderOrders();
+                loadOrders();
             } else {
                 updateConnectionStatus(false);
             }
-        }
-
-        async function loadOrders() {
-            const result = await api('/api/orders');
-            if (result && result.data) {
-                renderOrdersTable(result.data.orders || []);
-            }
-        }
-
-        function renderOrdersTable(orders) {
-            const tbody = document.getElementById('orders-tbody');
-            if (orders.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="empty">No active orders</td></tr>';
-                return;
-            }
-            tbody.innerHTML = orders.map(order => `
-                <tr>
-                    <td>${order.symbol}</td>
-                    <td class="${order.direction.includes('LONG') ? 'long' : 'short'}">${order.direction}</td>
-                    <td>${order.price.toFixed(4)}</td>
-                    <td>${order.volume.toFixed(4)}</td>
-                    <td>${order.traded.toFixed(4)}</td>
-                    <td><span class="status-badge ${order.status.toLowerCase()}">${order.status}</span></td>
-                </tr>
-            `).join('');
         }
 
         function updateConnectionStatus(connected) {
@@ -372,7 +381,7 @@
         function renderAccounts(accounts) {
             const container = document.getElementById('accounts-container');
             if (accounts.length === 0) {
-                container.innerHTML = '<div class="empty">No accounts connected</div>';
+                container.innerHTML = '<div class="empty">No accounts connected. Please configure API first.</div>';
                 return;
             }
             container.innerHTML = accounts.map(acc => `
@@ -387,7 +396,7 @@
         function renderStrategies(strategies) {
             const container = document.getElementById('strategies-container');
             if (strategies.length === 0) {
-                container.innerHTML = '<div class="empty">No strategies. Add one to get started!</div>';
+                container.innerHTML = '<div class="empty">No strategies. Select a strategy class and click "Add Strategy" to get started!</div>';
                 return;
             }
             container.innerHTML = strategies.map(s => `
@@ -399,13 +408,33 @@
                         </div>
                     </div>
                     <div class="strategy-info">
-                        <div class="strategy-symbol">${s.symbol}</div>
-                        <div class="strategy-class">${s.class_name}</div>
+                        <span class="strategy-symbol">${s.symbol}</span>
+                        <span class="strategy-class">${s.class_name}</span>
                     </div>
-                    <div class="strategy-pos">Position: ${s.pos}</div>
+                    <div class="strategy-params">
+                        <div class="param-label">Parameters:</div>
+                        <div class="param-grid">
+                            ${Object.entries(s.parameters || {}).map(([k, v]) => `
+                                <div class="param-item">
+                                    <span class="param-key">${k}:</span>
+                                    <span class="param-value">${typeof v === 'number' ? v.toFixed(4) : v}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="strategy-vars">
+                        <div class="var-item">
+                            <span class="var-key">Position:</span>
+                            <span class="var-value ${s.variables?.pos > 0 ? 'positive' : s.variables?.pos < 0 ? 'negative' : ''}">${s.variables?.pos || 0}</span>
+                        </div>
+                        <div class="var-item">
+                            <span class="var-key">Inited:</span>
+                            <span class="var-value">${s.variables?.inited ? '✓' : '✗'}</span>
+                        </div>
+                    </div>
                     <div class="strategy-actions">
-                        ${!s.inited ? `<button onclick="initStrategy('${s.name}')">Init</button>` : ''}
-                        ${s.inited && !s.trading ? `<button onclick="startStrategy('${s.name}')" class="btn-start">Start</button>` : ''}
+                        ${!s.variables?.inited ? `<button onclick="initStrategy('${s.name}')">Init</button>` : ''}
+                        ${s.variables?.inited && !s.trading ? `<button onclick="startStrategy('${s.name}')" class="btn-start">Start</button>` : ''}
                         ${s.trading ? `<button onclick="stopStrategy('${s.name}')" class="btn-stop">Stop</button>` : ''}
                         ${!s.trading ? `
                             <button onclick="showEditModal('${s.name}')">Edit</button>
@@ -432,24 +461,275 @@
             `).join('');
         }
 
-        function renderOrders() {
+        async function loadOrders() {
+            const result = await api('/api/orders');
+            if (result && result.data) {
+                renderOrdersTable(result.data.orders || []);
+            }
+        }
+
+        function renderOrdersTable(orders) {
+            const tbody = document.getElementById('orders-tbody');
+            if (orders.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty">No active orders</td></tr>';
+                return;
+            }
+            tbody.innerHTML = orders.map(order => `
+                <tr>
+                    <td>${order.symbol}</td>
+                    <td class="${order.direction.includes('LONG') ? 'long' : 'short'}">${order.direction}</td>
+                    <td>${order.price.toFixed(4)}</td>
+                    <td>${order.volume.toFixed(4)}</td>
+                    <td>${order.traded.toFixed(4)}</td>
+                    <td><span class="status-badge ${order.status.toLowerCase()}">${order.status}</span></td>
+                    <td><button onclick="cancelOrder('${order.vt_orderid}')" class="btn-cancel">Cancel</button></td>
+                </tr>
+            `).join('');
+        }
+
+        async function cancelOrder(vtOrderId) {
+            if (!confirm('Cancel this order?')) return;
+            await api(`/api/orders/${vtOrderId}/cancel`, { method: 'POST' });
             loadOrders();
         }
 
-        // Strategy Actions
+        // ========== Logs Functions ==========
+        async function loadLogs() {
+            const result = await api('/api/logs?limit=50');
+            if (result && result.data) {
+                logs = result.data.logs || [];
+                renderLogs();
+            }
+        }
+
+        function renderLogs() {
+            const container = document.getElementById('log-container');
+            if (logs.length === 0) {
+                container.innerHTML = '<div class="empty">No logs</div>';
+                return;
+            }
+            container.innerHTML = logs.map(log => {
+                const levelClass = {
+                    10: 'log-debug',
+                    20: 'log-info',
+                    30: 'log-warning',
+                    40: 'log-error'
+                }[log.level] || 'log-info';
+                const levelName = {
+                    10: 'DEBUG',
+                    20: 'INFO',
+                    30: 'WARN',
+                    40: 'ERROR'
+                }[log.level] || 'INFO';
+                return `<div class="log-entry ${levelClass}">[${log.time || 'system'}] [${levelName}] ${log.msg}</div>`;
+            }).join('');
+            // Auto scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogs() {
+            logs = [];
+            renderLogs();
+        }
+
+        // ========== Add Strategy Modal ==========
+        function showAddStrategyModal() {
+            const className = document.getElementById('strategy-class-select').value;
+            if (!className) {
+                alert('Please select a strategy class first from the dropdown');
+                return;
+            }
+
+            const cls = strategyClasses.find(c => c.class_name === className);
+            if (!cls) return;
+
+            const paramsContainer = document.getElementById('dynamic-params');
+            paramsContainer.innerHTML = '';
+
+            // Generate form fields for all parameters
+            Object.entries(cls.parameters).forEach(([key, value]) => {
+                if (key === 'strategy_name' || key === 'vt_symbol') return;
+
+                const div = document.createElement('div');
+                div.className = 'form-group';
+                const inputType = typeof value === 'number' ? 'number' : 'text';
+                div.innerHTML = `
+                    <label>${formatLabel(key)}</label>
+                    <input type="${inputType}"
+                           name="${key}"
+                           id="add-${key}"
+                           value="${value}"
+                           step="any"
+                           oninput="updateComputeResult()">
+                `;
+                paramsContainer.appendChild(div);
+            });
+
+            // Update compute result on input change
+            updateComputeResult();
+
+            document.getElementById('add-strategy-modal').style.display = 'block';
+        }
+
+        function formatLabel(key) {
+            const labels = {
+                'upper_price': 'Upper Price (USDT)',
+                'bottom_price': 'Bottom Price (USDT)',
+                'grid_number': 'Grid Number',
+                'order_volume': 'Order Volume',
+                'max_open_orders': 'Max Open Orders',
+                'invest_coin': 'Invest Coin'
+            };
+            return labels[key] || key;
+        }
+
+        function updateComputeResult() {
+            const upperPrice = parseFloat(document.getElementById('add-upper_price')?.value) || 0;
+            const bottomPrice = parseFloat(document.getElementById('add-bottom_price')?.value) || 0;
+            const gridNumber = parseFloat(document.getElementById('add-grid_number')?.value) || 0;
+            const orderVolume = parseFloat(document.getElementById('add-order_volume')?.value) || 0;
+            const maxOpenOrders = parseFloat(document.getElementById('add-max_open_orders')?.value) || 0;
+
+            const container = document.getElementById('compute-result');
+
+            if (upperPrice <= 0 || bottomPrice <= 0 || gridNumber <= 0 || orderVolume <= 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            const refPrice = (upperPrice + bottomPrice) / 2;
+            const maxInvest = refPrice * maxOpenOrders * orderVolume;
+            const perGridUSDT = refPrice * orderVolume;
+            const stepPrice = (upperPrice - bottomPrice) / gridNumber;
+            const perGridProfit = (stepPrice / refPrice * 100).toFixed(4);
+
+            container.innerHTML = `
+                <div class="compute-title">Estimated Calculation</div>
+                <div class="compute-grid">
+                    <div class="compute-item">
+                        <span class="compute-label">Reference Price</span>
+                        <span class="compute-value">${refPrice.toFixed(4)} USDT</span>
+                    </div>
+                    <div class="compute-item">
+                        <span class="compute-label">Max Investment</span>
+                        <span class="compute-value">${maxInvest.toFixed(4)} USDT</span>
+                    </div>
+                    <div class="compute-item">
+                        <span class="compute-label">Per Grid (USDT)</span>
+                        <span class="compute-value">${perGridUSDT.toFixed(4)} USDT</span>
+                    </div>
+                    <div class="compute-item">
+                        <span class="compute-label">Per Grid Profit</span>
+                        <span class="compute-value highlight">${perGridProfit}%</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function handleAddStrategy(e) {
+            e.preventDefault();
+
+            const className = document.getElementById('strategy-class-select').value;
+            const strategyName = document.getElementById('new-strategy-name').value;
+            const symbol = document.getElementById('new-strategy-symbol').value;
+
+            const params = {};
+            const formData = new FormData(e.target);
+            for (const [key, value] of formData.entries()) {
+                if (value && key !== 'strategy_name' && key !== 'vt_symbol') {
+                    params[key] = isNaN(value) || value === '' ? value : parseFloat(value);
+                }
+            }
+
+            const result = await api('/api/strategies', {
+                method: 'POST',
+                body: JSON.stringify({
+                    class_name: className,
+                    strategy_name: strategyName,
+                    vt_symbol: symbol,
+                    setting: params
+                })
+            });
+
+            if (result && result.code === 0) {
+                closeModal('add-strategy-modal');
+                loadStatus();
+                document.getElementById('new-strategy-name').value = '';
+                document.getElementById('new-strategy-symbol').value = '';
+            } else {
+                alert('Failed to add strategy: ' + (result ? result.message : 'Unknown error'));
+            }
+        }
+
+        // ========== Edit Strategy Modal ==========
+        async function showEditModal(strategyName) {
+            const result = await api(`/api/strategies/${strategyName}`);
+            if (!result || !result.data) return;
+
+            currentEditingStrategy = strategyName;
+            const strategy = result.data;
+
+            document.getElementById('edit-strategy-name').textContent = strategyName;
+
+            const paramsContainer = document.getElementById('edit-dynamic-params');
+            paramsContainer.innerHTML = '';
+
+            Object.entries(strategy.parameters).forEach(([key, value]) => {
+                const div = document.createElement('div');
+                div.className = 'form-group';
+                const inputType = typeof value === 'number' ? 'number' : 'text';
+                div.innerHTML = `
+                    <label>${formatLabel(key)}</label>
+                    <input type="${inputType}"
+                           name="${key}"
+                           id="edit-${key}"
+                           value="${value}"
+                           step="any">
+                `;
+                paramsContainer.appendChild(div);
+            });
+
+            document.getElementById('edit-strategy-modal').style.display = 'block';
+        }
+
+        async function handleEditStrategy(e) {
+            e.preventDefault();
+
+            const params = {};
+            const formData = new FormData(e.target);
+            for (const [key, value] of formData.entries()) {
+                if (value) {
+                    params[key] = isNaN(value) || value === '' ? value : parseFloat(value);
+                }
+            }
+
+            const result = await api(`/api/strategies/${currentEditingStrategy}`, {
+                method: 'PUT',
+                body: JSON.stringify({ setting: params })
+            });
+
+            if (result && result.success) {
+                closeModal('edit-strategy-modal');
+                loadStatus();
+            } else {
+                alert('Failed to edit strategy: ' + (result ? result.message : 'Unknown error'));
+            }
+        }
+
+        // ========== Strategy Actions ==========
         async function initStrategy(name) {
             await api(`/api/strategies/${name}/init`, { method: 'POST' });
-            loadStatus();
+            setTimeout(loadStatus, 500);
         }
 
         async function startStrategy(name) {
             await api(`/api/strategies/${name}/start`, { method: 'POST' });
-            loadStatus();
+            setTimeout(loadStatus, 500);
         }
 
         async function stopStrategy(name) {
             await api(`/api/strategies/${name}/stop`, { method: 'POST' });
-            loadStatus();
+            setTimeout(loadStatus, 500);
         }
 
         async function removeStrategy(name) {
@@ -474,7 +754,7 @@
             const result = await api('/api/strategies');
             if (result && result.data) {
                 for (const s of result.data.strategies) {
-                    if (s.variables.inited && !s.variables.trading) {
+                    if (s.variables.inited && !s.vading) {
                         await api(`/api/strategies/${s.strategy_name}/start`, { method: 'POST' });
                     }
                 }
@@ -494,134 +774,15 @@
             }
         }
 
-        // Modal Functions
-        function showAddStrategyModal() {
-            const className = document.getElementById('strategy-class-select').value;
-            if (!className) {
-                alert('Please select a strategy class first');
-                return;
-            }
-            
-            const cls = strategyClasses.find(c => c.class_name === className);
-            if (!cls) return;
-
-            const paramsContainer = document.getElementById('dynamic-params');
-            paramsContainer.innerHTML = '';
-            
-            Object.entries(cls.parameters).forEach(([key, value]) => {
-                if (key === 'strategy_name' || key === 'vt_symbol') return;
-                
-                const div = document.createElement('div');
-                div.className = 'form-group';
-                div.innerHTML = `
-                    <label>${key} ${key === 'strategy_name' || key === 'vt_symbol' ? '(auto)' : ''}</label>
-                    <input type="${typeof value === 'number' ? 'number' : 'text'}" 
-                           name="${key}" 
-                           value="${value}"
-                           step="any">
-                `;
-                paramsContainer.appendChild(div);
-            });
-            
-            document.getElementById('add-strategy-modal').style.display = 'block';
-        }
-
-        function handleClassSelectChange() {
-            // Auto-fill strategy name suggestion based on class
-            const className = document.getElementById('strategy-class-select').value;
-            if (className) {
-                const timestamp = Date.now().toString().slice(-4);
-                document.getElementById('new-strategy-name').value = `${className.replace('Strategy', '')}${timestamp}`;
-            }
-        }
-
-        async function handleAddStrategy(e) {
-            e.preventDefault();
-            
-            const className = document.getElementById('strategy-class-select').value;
-            const strategyName = document.getElementById('new-strategy-name').value;
-            const symbol = document.getElementById('new-strategy-symbol').value;
-            
-            const params = {};
-            const formData = new FormData(e.target);
-            for (const [key, value] of formData.entries()) {
-                if (value) {
-                    params[key] = isNaN(value) ? value : parseFloat(value);
-                }
-            }
-            
-            const result = await api('/api/strategies', {
-                method: 'POST',
-                body: JSON.stringify({
-                    class_name: className,
-                    strategy_name: strategyName,
-                    vt_symbol: symbol,
-                    setting: params
-                })
-            });
-            
-            if (result && result.code === 0) {
-                closeModal('add-strategy-modal');
-                loadStatus();
-            } else {
-                alert('Failed to add strategy: ' + (result ? result.message : 'Unknown error'));
-            }
-        }
-
-        async function showEditModal(strategyName) {
-            const result = await api(`/api/strategies/${strategyName}`);
-            if (!result || !result.data) return;
-            
-            currentEditingStrategy = strategyName;
-            const strategy = result.data;
-            
-            document.getElementById('edit-strategy-name').textContent = strategyName;
-            
-            const paramsContainer = document.getElementById('edit-dynamic-params');
-            paramsContainer.innerHTML = '';
-            
-            Object.entries(strategy.parameters).forEach(([key, value]) => {
-                const div = document.createElement('div');
-                div.className = 'form-group';
-                div.innerHTML = `
-                    <label>${key}</label>
-                    <input type="${typeof value === 'number' ? 'number' : 'text'}" 
-                           name="${key}" 
-                           value="${value}"
-                           step="any">
-                `;
-                paramsContainer.appendChild(div);
-            });
-            
-            document.getElementById('edit-strategy-modal').style.display = 'block';
-        }
-
-        async function handleEditStrategy(e) {
-            e.preventDefault();
-            
-            const params = {};
-            const formData = new FormData(e.target);
-            for (const [key, value] of formData.entries()) {
-                if (value) {
-                    params[key] = isNaN(value) ? value : parseFloat(value);
-                }
-            }
-            
-            await api(`/api/strategies/${currentEditingStrategy}`, {
-                method: 'PUT',
-                body: JSON.stringify({ setting: params })
-            });
-            
-            closeModal('edit-strategy-modal');
-            loadStatus();
-        }
-
+        // ========== Utility Functions ==========
         function closeModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
         }
 
         function refreshAll() {
             loadStatus();
+            loadLogs();
+            loadGateways();
         }
 
         // Close modal when clicking outside

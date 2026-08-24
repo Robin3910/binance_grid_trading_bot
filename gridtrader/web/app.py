@@ -46,7 +46,12 @@ class WebDashboard:
         self._setup_routes()
         self._running = False
         self._server_thread = None
-    
+        self._recent_logs = []
+
+    def _get_recent_logs(self, limit: int = 50):
+        """获取最近的日志"""
+        return self._recent_logs[-limit:]
+
     def _setup_routes(self):
         """设置路由"""
         app = self.app
@@ -67,15 +72,9 @@ class WebDashboard:
             cta_engine = self.main_engine.get_engine('strategy')
             strategies = []
             for name, strategy in cta_engine.strategies.items():
-                strategies.append({
-                    'name': name,
-                    'symbol': strategy.vt_symbol,
-                    'class_name': strategy.__class__.__name__,
-                    'inited': strategy.inited,
-                    'trading': strategy.trading,
-                    'pos': strategy.pos
-                })
-            
+                data = strategy.get_data()
+                strategies.append(data)
+
             accounts = []
             for acc in self.main_engine.get_all_accounts():
                 accounts.append({
@@ -84,7 +83,7 @@ class WebDashboard:
                     'balance': acc.balance,
                     'frozen': acc.frozen
                 })
-            
+
             positions = []
             for pos in self.main_engine.get_all_positions():
                 positions.append({
@@ -94,7 +93,7 @@ class WebDashboard:
                     'volume': pos.volume,
                     'price': getattr(pos, 'price', 0)
                 })
-            
+
             return jsonify({
                 'strategies': strategies,
                 'accounts': accounts,
@@ -251,6 +250,32 @@ class WebDashboard:
                     for order in orders
                 ]
             })
+
+        @app.route('/api/orders/<vt_orderid>/cancel', methods=['POST'])
+        def api_cancel_order(vt_orderid):
+            """撤销订单"""
+            order = self.main_engine.get_active_order(vt_orderid)
+            if not order:
+                return jsonify({'success': False, 'message': 'Order not found'})
+            req = order.create_cancel_request()
+            self.main_engine.cancel_order(req, order.gateway_name)
+            return jsonify({'success': True})
+
+        @app.route('/api/logs')
+        def api_logs():
+            """获取日志"""
+            limit = request.args.get('limit', 50, type=int)
+            limit = min(limit, 200)
+
+            # 从 LogEngine 获取日志
+            log_engine = self.main_engine.get_engine('log')
+            logs = []
+            if log_engine:
+                logs = log_engine.get_recent_logs(limit)
+            else:
+                logs = self._get_recent_logs(limit)
+
+            return jsonify({'logs': logs})
     
     def start(self):
         """启动 Web 服务"""
